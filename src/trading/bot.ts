@@ -242,23 +242,49 @@ export class TradingBot {
      */
     private async placeTpSlOrders(entryPrice: number, quantity: number): Promise<{ tpOrderId: number | null; slOrderId: number | null }> {
         log.info('[STEP 3] Placing TP and SL orders...');
-        log.info('[STEP 3] Entry details:', { entryPrice, quantity, direction: this.direction });
+        log.info('[STEP 3] Entry details:', { entryPrice, quantity, direction: this.direction, strategy: this.config.strategy });
 
         // Exit side is opposite of entry
         const exitSide = this.direction === 'LONG' ? 'SELL' : 'BUY';
 
-        // Calculate TP price (from orderbook)
-        const tpPrice = this.orderbookManager.getTakeProfitPrice(this.direction, this.config.tpLevel);
-        if (!tpPrice) {
-            log.error('[STEP 3] Could not get TP price from orderbook');
-            return { tpOrderId: null, slOrderId: null };
-        }
+        let tpPrice: number;
+        let slPrice: number;
 
-        // Calculate SL price (from orderbook)
-        const slPrice = this.orderbookManager.getStopLossPrice(this.direction, this.config.slLevel);
-        if (!slPrice) {
-            log.error('[STEP 3] Could not get SL price from orderbook');
-            return { tpOrderId: null, slOrderId: null };
+        if (this.config.strategy === 'risk_reward') {
+            // Risk-Reward Strategy: Calculate TP/SL based on entry price and ratio
+            const slDistance = entryPrice * (this.config.slDistancePercent / 100);
+            const tpDistance = slDistance * this.config.riskRewardRatio;
+
+            if (this.direction === 'LONG') {
+                tpPrice = entryPrice + tpDistance;
+                slPrice = entryPrice - slDistance;
+            } else {
+                tpPrice = entryPrice - tpDistance;
+                slPrice = entryPrice + slDistance;
+            }
+
+            log.info('[STEP 3] Risk-Reward calculation:', {
+                slDistancePercent: this.config.slDistancePercent,
+                riskRewardRatio: this.config.riskRewardRatio,
+                slDistance: this.formatPrice(slDistance),
+                tpDistance: this.formatPrice(tpDistance),
+            });
+        } else {
+            // Orderbook Strategy: Get TP/SL from orderbook levels
+            const orderbookTp = this.orderbookManager.getTakeProfitPrice(this.direction, this.config.tpLevel);
+            if (!orderbookTp) {
+                log.error('[STEP 3] Could not get TP price from orderbook');
+                return { tpOrderId: null, slOrderId: null };
+            }
+
+            const orderbookSl = this.orderbookManager.getStopLossPrice(this.direction, this.config.slLevel);
+            if (!orderbookSl) {
+                log.error('[STEP 3] Could not get SL price from orderbook');
+                return { tpOrderId: null, slOrderId: null };
+            }
+
+            tpPrice = orderbookTp;
+            slPrice = orderbookSl;
         }
 
         const formattedTpPrice = this.formatPrice(tpPrice);
@@ -320,8 +346,8 @@ export class TradingBot {
         log.info('[STEP 4] Monitoring TP/SL orders...');
         log.info('[STEP 4] Order IDs:', { tpOrderId, slAlgoId: slOrderId });
 
-        const pollInterval = 2000; // Check every 2 seconds
-        const maxWaitTime = 10 * 60 * 1000; // 10 minutes max
+        const pollInterval = this.config.tpslMonitorIntervalSeconds * 1000;
+        const maxWaitTime = 60 * 60 * 1000; // 1 hour max
         const startTime = Date.now();
 
         while (Date.now() - startTime < maxWaitTime) {
@@ -337,15 +363,16 @@ export class TradingBot {
                     log.info('[STEP 4] Stats:', { wins: this.totalWins, losses: this.totalLosses, consecutiveLosses: 0 });
 
                     // Cancel SL order (may already be expired after position closed)
-                    if (slOrderId) {
-                        try {
-                            await this.client.cancelAlgoOrder(this.config.symbol, slOrderId);
-                            log.info('[STEP 4] SL order canceled');
-                        } catch (_e) {
-                            // Expected: SL auto-expires when position closes via TP
-                            log.debug('[STEP 4] SL order already expired (position closed)');
-                        }
-                    }
+                    // if (slOrderId) {
+                    //     try {
+                    //         await this.client.cancelAlgoOrder(this.config.symbol, slOrderId);
+                    //         log.info('[STEP 4] SL order canceled');
+                    //     } catch (_e) {
+                    //         // Expected: SL auto-expires when position closes via TP
+                    //         log.debug('[STEP 4] SL order already expired (position closed)');
+                    //     }
+                    // }
+                    log.debug('[STEP 4] SL order already expired (position closed)');
                     return;
                 }
 
