@@ -1,0 +1,23 @@
+{
+  "name": "orderbook_trader",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun run --watch src/index.ts",
+    "test": "bun test",
+    "test:api": "bun test src/tests/api.test.ts",
+    "test:orderbook": "bun test src/tests/orderbook.test.ts",
+    "test:trading": "bun test src/tests/trading.test.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "zod": "^4.1.13"
+  }
+}
