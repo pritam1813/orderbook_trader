@@ -7,12 +7,23 @@ const LOG_LEVELS: Record<LogLevel, number> = {
     error: 3,
 };
 
+// Broadcast callback type for dashboard integration
+type LogBroadcastCallback = (level: string, context: string, message: string, data?: object) => void;
+
 class Logger {
     private level: LogLevel = 'info';
     private prefix: string;
+    private static broadcastCallback: LogBroadcastCallback | null = null;
 
     constructor(prefix: string = 'BOT') {
         this.prefix = prefix;
+    }
+
+    /**
+     * Set broadcast callback for dashboard log streaming
+     */
+    static setBroadcastCallback(callback: LogBroadcastCallback | null): void {
+        Logger.broadcastCallback = callback;
     }
 
     setLevel(level: LogLevel): void {
@@ -35,27 +46,42 @@ class Logger {
         return formatted;
     }
 
+    private broadcast(level: string, message: string, data?: unknown): void {
+        if (Logger.broadcastCallback) {
+            Logger.broadcastCallback(
+                level.toUpperCase(),
+                this.prefix,
+                message,
+                data as object | undefined
+            );
+        }
+    }
+
     debug(message: string, data?: unknown): void {
         if (this.shouldLog('debug')) {
             console.log(this.formatMessage('debug', message, data));
+            this.broadcast('debug', message, data);
         }
     }
 
     info(message: string, data?: unknown): void {
         if (this.shouldLog('info')) {
             console.log(this.formatMessage('info', message, data));
+            this.broadcast('info', message, data);
         }
     }
 
     warn(message: string, data?: unknown): void {
         if (this.shouldLog('warn')) {
             console.warn(this.formatMessage('warn', message, data));
+            this.broadcast('warn', message, data);
         }
     }
 
     error(message: string, data?: unknown): void {
         if (this.shouldLog('error')) {
             console.error(this.formatMessage('error', message, data));
+            this.broadcast('error', message, data);
         }
     }
 
@@ -64,6 +90,7 @@ class Logger {
         if (this.shouldLog('info')) {
             const timestamp = new Date().toISOString();
             console.log(`${timestamp} TRADE [${this.prefix}] ${action}`, JSON.stringify(details));
+            this.broadcast('TRADE', action, details);
         }
     }
 
@@ -79,3 +106,4 @@ export const logger = new Logger('BOT');
 
 // Export the class for creating child loggers
 export { Logger };
+

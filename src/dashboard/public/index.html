@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Bot Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>🤖 Trading Bot Dashboard</h1>
+            <div class="status-indicator" id="status-indicator">
+                <span class="status-dot"></span>
+                <span class="status-text">Connecting...</span>
+            </div>
+        </header>
+
+        <main class="main">
+            <!-- Status Panel -->
+            <section class="panel status-panel">
+                <h2>📊 Bot Status</h2>
+                <div class="status-grid">
+                    <div class="stat-card">
+                        <span class="stat-label">Status</span>
+                        <span class="stat-value" id="bot-status">--</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Direction</span>
+                        <span class="stat-value" id="bot-direction">--</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Strategy</span>
+                        <span class="stat-value" id="bot-strategy">--</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Uptime</span>
+                        <span class="stat-value" id="bot-uptime">--</span>
+                    </div>
+                </div>
+                <div class="current-trade" id="current-trade">
+                    <h3>Current Trade</h3>
+                    <div id="trade-details">No active trade</div>
+                </div>
+                <div class="bot-controls">
+                    <button id="stop-bot" class="btn btn-danger">⏹ Stop Bot</button>
+                    <span id="stop-message" class="config-message"></span>
+                </div>
+            </section>
+
+            <!-- Statistics Panel -->
+            <section class="panel stats-panel">
+                <h2>📈 Statistics</h2>
+                <div class="stats-grid">
+                    <div class="stat-card highlight">
+                        <span class="stat-label">Win Rate</span>
+                        <span class="stat-value" id="win-rate">0%</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Wins</span>
+                        <span class="stat-value win" id="total-wins">0</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Losses</span>
+                        <span class="stat-value loss" id="total-losses">0</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Total Trades</span>
+                        <span class="stat-value" id="total-trades">0</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Volume</span>
+                        <span class="stat-value" id="total-volume">$0</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Gross P&L</span>
+                        <span class="stat-value" id="total-pnl">$0</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Fees</span>
+                        <span class="stat-value fee" id="total-fees">$0</span>
+                    </div>
+                    <div class="stat-card highlight">
+                        <span class="stat-label">Net P&L</span>
+                        <span class="stat-value" id="net-pnl">$0</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Trade History -->
+            <section class="panel trades-panel">
+                <h2>📜 Trade History</h2>
+                <div class="table-container">
+                    <table class="trades-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Direction</th>
+                                <th>Entry</th>
+                                <th>Exit</th>
+                                <th>Qty</th>
+                                <th>Result</th>
+                                <th>P&L</th>
+                                <th>Fees</th>
+                                <th>Net</th>
+                            </tr>
+                        </thead>
+                        <tbody id="trades-body">
+                            <tr>
+                                <td colspan="9" class="empty">No trades yet</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Config Panel -->
+            <section class="panel config-panel">
+                <h2>⚙️ Configuration</h2>
+                <form id="config-form" class="config-form">
+                    <div class="config-group">
+                        <h3>Trading</h3>
+                        <div class="config-row">
+                            <label>Symbol</label>
+                            <input type="text" name="symbol" id="cfg-symbol">
+                        </div>
+                        <div class="config-row">
+                            <label>Quantity</label>
+                            <input type="number" step="0.001" name="quantity" id="cfg-quantity">
+                        </div>
+                        <div class="config-row">
+                            <label>Leverage</label>
+                            <input type="number" min="1" max="125" name="leverage" id="cfg-leverage">
+                        </div>
+                    </div>
+
+                    <div class="config-group">
+                        <h3>Strategy</h3>
+                        <div class="config-row">
+                            <label>Strategy</label>
+                            <select name="strategy" id="cfg-strategy">
+                                <option value="orderbook">Orderbook</option>
+                                <option value="risk_reward">Risk-Reward</option>
+                            </select>
+                        </div>
+                        <div class="config-row">
+                            <label>Initial Direction</label>
+                            <select name="initialDirection" id="cfg-direction">
+                                <option value="LONG">LONG</option>
+                                <option value="SHORT">SHORT</option>
+                            </select>
+                        </div>
+                        <div class="config-row">
+                            <label>Direction Switch Losses</label>
+                            <input type="number" min="1" name="directionSwitchLosses" id="cfg-switch-losses">
+                        </div>
+                    </div>
+
+                    <div class="config-group orderbook-config">
+                        <h3>Orderbook Strategy</h3>
+                        <div class="config-row">
+                            <label>Entry Level</label>
+                            <input type="number" min="1" max="20" name="entryLevel" id="cfg-entry-level">
+                        </div>
+                        <div class="config-row">
+                            <label>TP Level</label>
+                            <input type="number" min="1" max="20" name="tpLevel" id="cfg-tp-level">
+                        </div>
+                        <div class="config-row">
+                            <label>SL Level</label>
+                            <input type="number" min="1" max="20" name="slLevel" id="cfg-sl-level">
+                        </div>
+                    </div>
+
+                    <div class="config-group rr-config">
+                        <h3>Risk-Reward Strategy</h3>
+                        <div class="config-row">
+                            <label>Risk:Reward Ratio</label>
+                            <input type="number" step="0.1" min="0.1" name="riskRewardRatio" id="cfg-rr-ratio">
+                        </div>
+                        <div class="config-row">
+                            <label>SL Distance %</label>
+                            <input type="number" step="0.01" min="0.01" name="slDistancePercent" id="cfg-sl-percent">
+                        </div>
+                    </div>
+
+                    <div class="config-group">
+                        <h3>Timing</h3>
+                        <div class="config-row">
+                            <label>Order Timeout (s)</label>
+                            <input type="number" min="5" max="300" name="orderTimeoutSeconds" id="cfg-timeout">
+                        </div>
+                        <div class="config-row">
+                            <label>TP/SL Monitor Interval (s)</label>
+                            <input type="number" min="1" max="60" name="tpslMonitorIntervalSeconds"
+                                id="cfg-monitor-interval">
+                        </div>
+                    </div>
+
+                    <div class="config-actions">
+                        <button type="submit" class="btn btn-primary">Save Config</button>
+                        <span id="config-message" class="config-message"></span>
+                    </div>
+                </form>
+            </section>
+
+            <!-- Live Logs -->
+            <section class="panel logs-panel">
+                <h2>📋 Live Logs</h2>
+                <div class="logs-controls">
+                    <button id="clear-logs" class="btn btn-secondary">Clear</button>
+                    <label><input type="checkbox" id="auto-scroll" checked> Auto-scroll</label>
+                </div>
+                <div class="logs-container" id="logs-container"></div>
+            </section>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

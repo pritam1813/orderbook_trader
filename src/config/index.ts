@@ -79,7 +79,7 @@ export function loadConfig(): Config {
 export function getEndpoints(useTestnet: boolean) {
     return {
         restBaseUrl: useTestnet
-            ? 'https://testnet.binancefuture.com'
+            ? 'https://demo-fapi.binance.com'
             : 'https://fapi.binance.com',
         wsBaseUrl: useTestnet
             ? 'wss://fstream.binancefuture.com'

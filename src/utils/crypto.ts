@@ -50,7 +50,8 @@ export async function buildSignedQueryString(
     apiSecret: string,
     recvWindow: number = 5000
 ): Promise<string> {
-    const timestamp = Date.now();
+    // Use timestamp from params if provided (allows server-synced time), otherwise use Date.now()
+    const timestamp = params.timestamp ?? Date.now();
     const paramsWithTimestamp = {
         ...params,
         timestamp,

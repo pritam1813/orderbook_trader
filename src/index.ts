@@ -1,6 +1,7 @@
-import { logger } from './utils/logger';
+import { logger, Logger } from './utils/logger';
 import { getConfig } from './config';
 import { runBot } from './trading';
+import { startDashboard, broadcastLog } from './dashboard/server';
 
 const log = logger;
 
@@ -20,9 +21,12 @@ async function main() {
             quantity: config.quantity,
             leverage: config.leverage,
             direction: config.initialDirection,
+            strategy: config.strategy,
             entryLevel: config.entryLevel,
             tpLevel: config.tpLevel,
             slLevel: config.slLevel,
+            riskRewardRatio: config.riskRewardRatio,
+            slDistancePercent: config.slDistancePercent,
             orderTimeoutSeconds: config.orderTimeoutSeconds,
             directionSwitchLosses: config.directionSwitchLosses,
             testnet: config.useTestnet,
@@ -33,6 +37,13 @@ async function main() {
             log.error('API credentials not configured. Please set BINANCE_API_KEY and BINANCE_API_SECRET in .env');
             process.exit(1);
         }
+
+        // Start dashboard server
+        const dashboardPort = parseInt(process.env.DASHBOARD_PORT || '3000', 10);
+        startDashboard(dashboardPort);
+
+        // Set up log broadcasting to dashboard
+        Logger.setBroadcastCallback(broadcastLog);
 
         // Start the bot
         await runBot();
@@ -49,3 +60,4 @@ async function main() {
 }
 
 main();
+

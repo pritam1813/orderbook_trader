@@ -3,6 +3,7 @@ import { getRestClient } from '../api/rest';
 import { OrderbookWebSocket } from '../api/websocket';
 import { OrderbookManager } from '../services/orderbook';
 import { logger } from '../utils/logger';
+import { getBotState } from './state';
 
 const log = logger.child('BOT');
 
@@ -15,10 +16,12 @@ export class TradingBot {
     private client = getRestClient();
     private orderbookManager: OrderbookManager;
     private orderbookWs: OrderbookWebSocket | null = null;
+    private state = getBotState();
 
     // Symbol precision info
     private pricePrecision: number = 2;
     private quantityPrecision: number = 3;
+    private tickSize: number = 0.01;
 
     private isRunning = false;
 
@@ -32,6 +35,7 @@ export class TradingBot {
         this.orderbookManager = new OrderbookManager(this.config.symbol);
         this.direction = this.config.initialDirection;
     }
+
 
     /**
      * Initialize the bot
@@ -55,7 +59,16 @@ export class TradingBot {
         if (symbolInfo) {
             this.pricePrecision = symbolInfo.pricePrecision;
             this.quantityPrecision = symbolInfo.quantityPrecision;
-            log.info('Symbol info loaded', { pricePrecision: this.pricePrecision, quantityPrecision: this.quantityPrecision });
+
+            // Extract tick size from PRICE_FILTER
+            for (const filter of symbolInfo.filters) {
+                if (filter.filterType === 'PRICE_FILTER' && filter.tickSize) {
+                    this.tickSize = parseFloat(filter.tickSize);
+                    break;
+                }
+            }
+
+            log.info('Symbol info loaded', { pricePrecision: this.pricePrecision, quantityPrecision: this.quantityPrecision, tickSize: this.tickSize });
         }
 
         // Set leverage
@@ -79,11 +92,14 @@ export class TradingBot {
     }
 
     /**
-     * Format price to symbol precision
+     * Format price to symbol precision and tick size
      */
     private formatPrice(price: number): number {
+        // Round to tick size
+        const rounded = Math.round(price / this.tickSize) * this.tickSize;
+        // Then round to precision to avoid floating point issues
         const factor = Math.pow(10, this.pricePrecision);
-        return Math.round(price * factor) / factor;
+        return Math.round(rounded * factor) / factor;
     }
 
     /**
@@ -106,9 +122,11 @@ export class TradingBot {
      */
     async run(): Promise<void> {
         this.isRunning = true;
+        this.state.setRunning(true);
+        this.state.setDirection(this.direction);
         log.info('=== STARTING TRADING LOOP ===');
 
-        while (this.isRunning) {
+        while (this.isRunning && this.state.isRunning) {
             try {
                 await this.executeTradeCycle();
             } catch (error) {
@@ -116,6 +134,9 @@ export class TradingBot {
                 await this.sleep(5000);
             }
         }
+        this.isRunning = false;
+        this.state.setRunning(false);
+        log.info('=== TRADING LOOP STOPPED ===');
     }
 
     /**
@@ -141,15 +162,25 @@ export class TradingBot {
         }
 
         // Step 3: Place TP and SL orders
-        const { tpOrderId, slOrderId } = await this.placeTpSlOrders(entryFilled.avgPrice, entryFilled.quantity);
+        const { tpOrderId, slOrderId, tpPrice, slPrice } = await this.placeTpSlOrders(entryFilled.avgPrice, entryFilled.quantity);
         if (!tpOrderId) {
             log.error('Failed to place TP/SL, closing position');
             await this.closePosition();
             return;
         }
 
+        // Track trade in dashboard state
+        this.state.startTrade({
+            entryTime: Date.now(),
+            direction: this.direction,
+            entryPrice: entryFilled.avgPrice,
+            quantity: entryFilled.quantity,
+            tpPrice,
+            slPrice,
+        });
+
         // Step 4: Monitor TP/SL orders
-        await this.monitorTpSlOrders(tpOrderId, slOrderId);
+        await this.monitorTpSlOrders(tpOrderId, slOrderId, slPrice);
 
         log.info('========== TRADE CYCLE COMPLETE ==========');
         log.info('');
@@ -240,7 +271,7 @@ export class TradingBot {
     /**
      * Step 3: Place TP and SL orders
      */
-    private async placeTpSlOrders(entryPrice: number, quantity: number): Promise<{ tpOrderId: number | null; slOrderId: number | null }> {
+    private async placeTpSlOrders(entryPrice: number, quantity: number): Promise<{ tpOrderId: number | null; slOrderId: number | null; tpPrice: number; slPrice: number }> {
         log.info('[STEP 3] Placing TP and SL orders...');
         log.info('[STEP 3] Entry details:', { entryPrice, quantity, direction: this.direction, strategy: this.config.strategy });
 
@@ -274,13 +305,13 @@ export class TradingBot {
             const orderbookTp = this.orderbookManager.getTakeProfitPrice(this.direction, this.config.tpLevel);
             if (!orderbookTp) {
                 log.error('[STEP 3] Could not get TP price from orderbook');
-                return { tpOrderId: null, slOrderId: null };
+                return { tpOrderId: null, slOrderId: null, tpPrice: 0, slPrice: 0 };
             }
 
             const orderbookSl = this.orderbookManager.getStopLossPrice(this.direction, this.config.slLevel);
             if (!orderbookSl) {
                 log.error('[STEP 3] Could not get SL price from orderbook');
-                return { tpOrderId: null, slOrderId: null };
+                return { tpOrderId: null, slOrderId: null, tpPrice: 0, slPrice: 0 };
             }
 
             tpPrice = orderbookTp;
@@ -310,7 +341,7 @@ export class TradingBot {
             log.info('[STEP 3] ✅ TP order placed:', { orderId: tpOrderId });
         } catch (error) {
             log.error('[STEP 3] Failed to place TP order:', error);
-            return { tpOrderId: null, slOrderId: null };
+            return { tpOrderId: null, slOrderId: null, tpPrice: 0, slPrice: 0 };
         }
 
         // Place SL order (STOP_MARKET via algo API)
@@ -333,16 +364,16 @@ export class TradingBot {
             } catch (e) {
                 log.warn('[STEP 3] Could not cancel TP order:', e);
             }
-            return { tpOrderId: null, slOrderId: null };
+            return { tpOrderId: null, slOrderId: null, tpPrice: 0, slPrice: 0 };
         }
 
-        return { tpOrderId, slOrderId };
+        return { tpOrderId, slOrderId, tpPrice, slPrice };
     }
 
     /**
      * Step 4: Monitor TP/SL orders until one fills
      */
-    private async monitorTpSlOrders(tpOrderId: number, slOrderId: number | null): Promise<void> {
+    private async monitorTpSlOrders(tpOrderId: number, slOrderId: number | null, slPrice: number): Promise<void> {
         log.info('[STEP 4] Monitoring TP/SL orders...');
         log.info('[STEP 4] Order IDs:', { tpOrderId, slAlgoId: slOrderId });
 
@@ -360,19 +391,13 @@ export class TradingBot {
                     log.info('[STEP 4] ✅ TP FILLED - WIN!');
                     this.totalWins++;
                     this.consecutiveLosses = 0;
-                    log.info('[STEP 4] Stats:', { wins: this.totalWins, losses: this.totalLosses, consecutiveLosses: 0 });
 
-                    // Cancel SL order (may already be expired after position closed)
-                    // if (slOrderId) {
-                    //     try {
-                    //         await this.client.cancelAlgoOrder(this.config.symbol, slOrderId);
-                    //         log.info('[STEP 4] SL order canceled');
-                    //     } catch (_e) {
-                    //         // Expected: SL auto-expires when position closes via TP
-                    //         log.debug('[STEP 4] SL order already expired (position closed)');
-                    //     }
-                    // }
-                    log.debug('[STEP 4] SL order already expired (position closed)');
+                    // Update dashboard state
+                    const exitPrice = parseFloat(tpOrder.avgPrice || tpOrder.price || '0');
+                    this.state.completeTrade(exitPrice, 'WIN');
+
+                    log.info('[STEP 4] Stats:', { wins: this.totalWins, losses: this.totalLosses, consecutiveLosses: 0 });
+                    log.debug('[STEP 4] SL order auto-expired (position closed)');
                     return;
                 }
 
@@ -380,6 +405,10 @@ export class TradingBot {
                     log.info('[STEP 4] ❌ TP CANCELED - SL hit (LOSS)');
                     this.totalLosses++;
                     this.consecutiveLosses++;
+
+                    // Update dashboard state - use SL price as exit
+                    this.state.completeTrade(slPrice, 'LOSS');
+
                     log.info('[STEP 4] Stats:', { wins: this.totalWins, losses: this.totalLosses, consecutiveLosses: this.consecutiveLosses });
 
                     // Check if should switch direction
@@ -387,6 +416,8 @@ export class TradingBot {
                         const oldDirection = this.direction;
                         this.direction = this.direction === 'LONG' ? 'SHORT' : 'LONG';
                         this.consecutiveLosses = 0;
+                        this.state.setDirection(this.direction);
+                        this.state.resetConsecutiveLosses();
                         log.info('[STEP 4] 🔄 SWITCHING DIRECTION:', { from: oldDirection, to: this.direction });
                     }
                     return;
