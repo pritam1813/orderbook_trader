@@ -532,3 +532,232 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
+
+/* ===== RESPONSIVE STYLES ===== */
+
+/* Tablet breakpoint */
+@media (max-width: 992px) {
+    .container {
+        padding: 16px;
+    }
+
+    .header h1 {
+        font-size: 1.4rem;
+    }
+
+    .stat-value {
+        font-size: 1.2rem;
+    }
+
+    .logs-container {
+        height: 300px;
+    }
+
+    .config-form {
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    }
+}
+
+/* Mobile breakpoint */
+@media (max-width: 576px) {
+    .container {
+        padding: 12px;
+    }
+
+    /* Header */
+    .header {
+        flex-direction: column;
+        gap: 12px;
+        text-align: center;
+        padding: 16px 0;
+    }
+
+    .header h1 {
+        font-size: 1.2rem;
+    }
+
+    .status-indicator {
+        padding: 6px 12px;
+        font-size: 0.8rem;
+    }
+
+    /* Panels */
+    .panel {
+        padding: 14px;
+        border-radius: 8px;
+    }
+
+    .panel h2 {
+        font-size: 1rem;
+        margin-bottom: 12px;
+    }
+
+    /* Stats Grid */
+    .status-grid,
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+
+    .stat-card {
+        padding: 12px 8px;
+    }
+
+    .stat-label {
+        font-size: 0.65rem;
+    }
+
+    .stat-value {
+        font-size: 1rem;
+    }
+
+    /* Current Trade */
+    .current-trade {
+        padding: 12px;
+    }
+
+    .current-trade div[style*="grid"] {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 8px !important;
+    }
+
+    /* Bot Controls */
+    .bot-controls {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .bot-controls .btn {
+        flex: 1;
+        min-width: 100px;
+        padding: 10px 12px;
+        font-size: 0.8rem;
+    }
+
+    /* Trade Table */
+    .trades-table {
+        font-size: 0.75rem;
+    }
+
+    .trades-table th,
+    .trades-table td {
+        padding: 8px 4px;
+    }
+
+    .trades-table th {
+        font-size: 0.6rem;
+    }
+
+    /* Config Form */
+    .config-form {
+        grid-template-columns: 1fr;
+        gap: 14px;
+    }
+
+    .config-group {
+        padding: 12px;
+    }
+
+    .config-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+
+    .config-row label {
+        font-size: 0.8rem;
+    }
+
+    .config-row input,
+    .config-row select {
+        width: 100%;
+        padding: 10px 12px;
+    }
+
+    .config-actions {
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .config-actions .btn {
+        width: 100%;
+    }
+
+    .config-message {
+        text-align: center;
+        word-break: break-word;
+    }
+
+    /* Logs */
+    .logs-container {
+        height: 250px;
+        padding: 8px;
+        font-size: 0.7rem;
+    }
+
+    .log-entry {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .log-time {
+        font-size: 0.65rem;
+    }
+
+    .log-level {
+        font-size: 0.65rem;
+    }
+
+    .log-context {
+        font-size: 0.7rem;
+    }
+
+    .log-message {
+        flex-basis: 100%;
+        word-break: break-word;
+    }
+
+    .log-data {
+        flex-basis: 100%;
+        margin-left: 0;
+        font-size: 0.65rem;
+        word-break: break-all;
+    }
+
+    /* Buttons */
+    .btn {
+        padding: 10px 16px;
+        font-size: 0.85rem;
+    }
+
+    .logs-controls {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+}
+
+/* Extra small devices */
+@media (max-width: 400px) {
+
+    .status-grid,
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .header h1 {
+        font-size: 1.1rem;
+    }
+
+    .stat-value {
+        font-size: 1.1rem;
+    }
+
+    .trades-table {
+        font-size: 0.7rem;
+    }
+
+    .bot-controls .btn {
+        width: 100%;
+    }
+}
