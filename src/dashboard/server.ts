@@ -1,4 +1,5 @@
 import { getBotState } from '../trading/state';
+import { getBotManager } from '../trading/bot-manager';
 import { getConfig, loadConfig, type Config } from '../config';
 import { logger } from '../utils/logger';
 import { join } from 'path';
@@ -143,8 +144,17 @@ async function handleApiRequest(req: Request, path: string): Promise<Response> {
 
             case '/api/bot/stop':
                 if (method === 'POST') {
-                    botState.setRunning(false);
-                    return Response.json({ success: true, message: 'Bot stop signal sent. The bot will stop after current trade cycle completes.' }, { headers });
+                    const botManager = getBotManager();
+                    const result = await botManager.stopBot();
+                    return Response.json(result, { headers });
+                }
+                break;
+
+            case '/api/bot/start':
+                if (method === 'POST') {
+                    const botManager = getBotManager();
+                    const result = await botManager.startBot();
+                    return Response.json(result, { headers });
                 }
                 break;
 

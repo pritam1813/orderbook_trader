@@ -1,6 +1,6 @@
 import { logger, Logger } from './utils/logger';
 import { getConfig } from './config';
-import { runBot } from './trading';
+import { getBotManager } from './trading/bot-manager';
 import { startDashboard, broadcastLog } from './dashboard/server';
 
 const log = logger;
@@ -45,8 +45,14 @@ async function main() {
         // Set up log broadcasting to dashboard
         Logger.setBroadcastCallback(broadcastLog);
 
-        // Start the bot
-        await runBot();
+        // Start the bot via bot manager
+        const botManager = getBotManager();
+        const startResult = await botManager.startBot();
+
+        if (!startResult.success) {
+            log.error('Failed to start bot:', startResult.message);
+            process.exit(1);
+        }
 
         log.info('Bot is running. Press Ctrl+C to stop.');
 

@@ -28,6 +28,7 @@ const elements = {
     configMessage: document.getElementById('config-message'),
     clearLogs: document.getElementById('clear-logs'),
     autoScroll: document.getElementById('auto-scroll'),
+    startBot: document.getElementById('start-bot'),
     stopBot: document.getElementById('stop-bot'),
     stopMessage: document.getElementById('stop-message'),
 };
@@ -47,6 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     elements.configForm.addEventListener('submit', saveConfig);
     elements.clearLogs.addEventListener('click', clearLogs);
+    elements.startBot.addEventListener('click', startBot);
     elements.stopBot.addEventListener('click', stopBot);
 });
 
@@ -158,6 +160,36 @@ async function stopBot() {
     }
 }
 
+// Start Bot
+async function startBot() {
+    elements.startBot.disabled = true;
+    elements.startBot.textContent = 'Starting...';
+
+    try {
+        const res = await fetch(`${API_BASE}/api/bot/start`, {
+            method: 'POST',
+        });
+        const result = await res.json();
+
+        elements.stopMessage.textContent = result.message;
+        elements.stopMessage.className = 'config-message' + (result.success ? '' : ' error');
+
+        if (!result.success) {
+            elements.startBot.disabled = false;
+            elements.startBot.textContent = '▶ Start Bot';
+        }
+
+        setTimeout(() => {
+            elements.stopMessage.textContent = '';
+        }, 5000);
+    } catch (err) {
+        elements.stopMessage.textContent = 'Failed to start bot';
+        elements.stopMessage.className = 'config-message error';
+        elements.startBot.disabled = false;
+        elements.startBot.textContent = '▶ Start Bot';
+    }
+}
+
 // WebSocket
 function connectWebSocket() {
     ws = new WebSocket(WS_URL);
@@ -214,6 +246,19 @@ function updateStatus(status) {
     elements.botDirection.textContent = status.direction;
     elements.botDirection.className = 'stat-value ' + (status.direction === 'LONG' ? 'win' : 'loss');
     elements.botStrategy.textContent = status.strategy;
+
+    // Update button states
+    if (status.isRunning) {
+        elements.startBot.disabled = true;
+        elements.startBot.textContent = '▶ Start Bot';
+        elements.stopBot.disabled = false;
+        elements.stopBot.textContent = '⏹ Stop Bot';
+    } else {
+        elements.startBot.disabled = false;
+        elements.startBot.textContent = '▶ Start Bot';
+        elements.stopBot.disabled = true;
+        elements.stopBot.textContent = '⏹ Stop Bot';
+    }
 
     // Update uptime
     if (status.isRunning && status.startTime) {

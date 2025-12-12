@@ -408,6 +408,22 @@ body {
     transform: none;
 }
 
+.btn-success {
+    background: var(--accent-green);
+    color: white;
+}
+
+.btn-success:hover {
+    background: #36a346;
+    transform: translateY(-1px);
+}
+
+.btn-success:disabled {
+    background: var(--text-muted);
+    cursor: not-allowed;
+    transform: none;
+}
+
 /* Logs Panel */
 .logs-panel {
     grid-column: span 2;
