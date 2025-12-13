@@ -1,7 +1,7 @@
 {
     "symbol": "NIGHTUSDT",
-    "quantity": 110,
-    "leverage": 5,
+    "quantity": 500,
+    "leverage": 7,
     "initialDirection": "SHORT",
     "directionSwitchLosses": 3,
     "strategy": "micro_grid",
@@ -14,5 +14,8 @@
     "orderTimeoutSeconds": 30,
     "logLevel": "info",
     "spreadGapPercent": 0.1,
-    "priceRangePercent": 2
+    "priceRangePercent": 2,
+    "maxPositionMultiplier": 10,
+    "dailyLossLimitPercent": 5,
+    "makerFeePercent": 0.02
 }

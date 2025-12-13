@@ -29,6 +29,9 @@ export const TradingConfigSchema = z.object({
     // Micro-Grid strategy settings
     spreadGapPercent: z.number().positive().default(0.08), // 0.08% spread gap
     priceRangePercent: z.number().positive().default(2), // Only operate within ±2% of initial price
+    maxPositionMultiplier: z.number().int().min(1).max(50).default(10), // Max position = base qty * multiplier
+    dailyLossLimitPercent: z.number().positive().default(5), // Stop trading if daily loss exceeds 5%
+    makerFeePercent: z.number().min(0).default(0.02), // Maker fee rate (0.02% default)
 });
 
 export type TradingConfig = z.infer<typeof TradingConfigSchema>;
@@ -63,6 +66,9 @@ const DEFAULT_TRADING_CONFIG: TradingConfig = {
     logLevel: 'info',
     spreadGapPercent: 0.08,
     priceRangePercent: 2,
+    maxPositionMultiplier: 10,
+    dailyLossLimitPercent: 5,
+    makerFeePercent: 0.02,
 };
 
 /**

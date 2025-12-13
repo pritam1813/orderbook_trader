@@ -8,6 +8,7 @@ import {
     ListenKeySchema,
     OrderbookSnapshotSchema,
     OrderResponseSchema,
+    PositionSchema,
     ServerTimeSchema,
     type ExchangeInfo,
     type ListenKey,
@@ -15,6 +16,7 @@ import {
     type OrderResponse,
     type OrderSide,
     type OrderType,
+    type Position,
     type PositionSide,
     type ServerTime,
     type TimeInForce,
@@ -386,6 +388,32 @@ export class BinanceRestClient {
             algoId,  // Binance requires 'algoId' not 'algoOrderId'
         });
         log.info('Algo order cancelled', { algoId });
+    }
+
+    /**
+     * Get position risk (current position details) for a symbol
+     */
+    async getPositionRisk(symbol: string): Promise<Position | null> {
+        const data = await this.signedRequest<unknown[]>('GET', '/fapi/v2/positionRisk', {
+            symbol,
+        });
+
+        if (Array.isArray(data) && data.length > 0) {
+            // Find the BOTH position (for one-way mode) or the one with non-zero positionAmt
+            for (const pos of data) {
+                const parsed = PositionSchema.safeParse(pos);
+                if (parsed.success) {
+                    const posAmt = parseFloat(parsed.data.positionAmt);
+                    if (posAmt !== 0 || parsed.data.positionSide === 'BOTH') {
+                        return parsed.data;
+                    }
+                }
+            }
+            // If no active position, return the first one
+            const first = PositionSchema.safeParse(data[0]);
+            return first.success ? first.data : null;
+        }
+        return null;
     }
 }
 

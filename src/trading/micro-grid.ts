@@ -45,6 +45,22 @@ export class MicroGridStrategy {
     // Stats
     private tradesCompleted: number = 0;
 
+    // === CRITICAL SAFETY FEATURES ===
+    // Position limits
+    private maxPositionSize: number;
+    private makerFeeRate: number;
+
+    // Daily P&L tracking
+    private dailyPnL: number = 0;
+    private dailyStartBalance: number = 0;
+    private dailyLossLimit: number;
+    private tradingDay: string = '';
+
+    // Circuit breaker
+    private consecutiveLosses: number = 0;
+    private maxConsecutiveLosses: number = 5;
+    private isCircuitBroken: boolean = false;
+
     constructor() {
         this.config = getConfig();
         this.rest = getRestClient();
@@ -55,11 +71,19 @@ export class MicroGridStrategy {
         this.spreadGapPercent = this.config.spreadGapPercent / 100; // Convert to decimal
         this.priceRangePercent = this.config.priceRangePercent / 100; // Convert to decimal
 
+        // Initialize safety parameters
+        this.maxPositionSize = this.quantity * this.config.maxPositionMultiplier;
+        this.dailyLossLimit = this.config.dailyLossLimitPercent / 100; // Convert to decimal
+        this.makerFeeRate = this.config.makerFeePercent / 100; // Convert to decimal
+
         log.info('MicroGridStrategy initialized', {
             symbol: this.symbol,
             quantity: this.quantity,
             spreadGapPercent: `${this.config.spreadGapPercent}%`,
             priceRangePercent: `±${this.config.priceRangePercent}%`,
+            maxPositionSize: this.maxPositionSize,
+            dailyLossLimit: `${this.config.dailyLossLimitPercent}%`,
+            makerFeePercent: `${this.config.makerFeePercent}%`,
         });
     }
 
@@ -172,36 +196,162 @@ export class MicroGridStrategy {
     }
 
     /**
-     * Close any open position (used when out of range)
+     * Get current position size from exchange
+     */
+    private async getCurrentPositionSize(): Promise<number> {
+        try {
+            const position = await this.rest.getPositionRisk(this.symbol);
+            if (position) {
+                return Math.abs(parseFloat(position.positionAmt));
+            }
+        } catch (error) {
+            log.error('Error getting position size:', error);
+        }
+        return 0;
+    }
+
+    /**
+     * Check if we can open a new position (within limits)
+     */
+    private async canOpenPosition(): Promise<boolean> {
+        const currentSize = await this.getCurrentPositionSize();
+        const canOpen = currentSize < this.maxPositionSize;
+
+        if (!canOpen) {
+            log.warn('Position limit reached', {
+                currentSize,
+                maxSize: this.maxPositionSize,
+            });
+        }
+
+        return canOpen;
+    }
+
+    /**
+     * Calculate net P&L including fees (fee-aware profit calculation)
+     */
+    private calculateNetPnL(entryPrice: number, exitPrice: number, quantity: number, direction: 'LONG' | 'SHORT'): {
+        grossPnL: number;
+        fees: number;
+        netPnL: number;
+        isProfit: boolean;
+    } {
+        // Calculate gross P&L
+        let grossPnL: number;
+        if (direction === 'LONG') {
+            grossPnL = (exitPrice - entryPrice) * quantity;
+        } else {
+            grossPnL = (entryPrice - exitPrice) * quantity;
+        }
+
+        // Calculate fees (maker fee on both entry and exit)
+        const entryNotional = entryPrice * quantity;
+        const exitNotional = exitPrice * quantity;
+        const fees = (entryNotional + exitNotional) * this.makerFeeRate;
+
+        // Net P&L after fees
+        const netPnL = grossPnL - fees;
+
+        return {
+            grossPnL,
+            fees,
+            netPnL,
+            isProfit: netPnL > 0,
+        };
+    }
+
+    /**
+     * Check and reset daily P&L tracking if new trading day
+     */
+    private checkDailyReset(): void {
+        const today = new Date().toISOString().split('T')[0] ?? '';
+        if (this.tradingDay !== today) {
+            log.info('New trading day, resetting daily P&L', {
+                previousDay: this.tradingDay,
+                previousPnL: this.dailyPnL,
+                newDay: today
+            });
+            this.tradingDay = today;
+            this.dailyPnL = 0;
+            this.consecutiveLosses = 0;
+            this.isCircuitBroken = false;
+        }
+    }
+
+    /**
+     * Check if circuit breaker should be triggered
+     */
+    private checkCircuitBreaker(): boolean {
+        // Check daily loss limit
+        const estimatedBalance = this.dailyStartBalance > 0 ? this.dailyStartBalance : 1000; // Fallback
+        const lossPercent = Math.abs(this.dailyPnL) / estimatedBalance;
+
+        if (this.dailyPnL < 0 && lossPercent >= this.dailyLossLimit) {
+            log.error('CIRCUIT BREAKER: Daily loss limit reached!', {
+                dailyPnL: this.dailyPnL,
+                lossPercent: `${(lossPercent * 100).toFixed(2)}%`,
+                limit: `${(this.dailyLossLimit * 100).toFixed(2)}%`,
+            });
+            this.isCircuitBroken = true;
+            return true;
+        }
+
+        // Check consecutive losses
+        if (this.consecutiveLosses >= this.maxConsecutiveLosses) {
+            log.error('CIRCUIT BREAKER: Max consecutive losses reached!', {
+                consecutiveLosses: this.consecutiveLosses,
+                maxAllowed: this.maxConsecutiveLosses,
+            });
+            this.isCircuitBroken = true;
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Close any open position (used when out of range or circuit breaker)
      */
     private async closePosition(): Promise<void> {
         try {
             // Cancel all open orders first
             await this.cancelAllOrders();
 
-            // Try to close with reduceOnly market - will fail gracefully if no position
-            try {
+            // Get actual position from exchange
+            const position = await this.rest.getPositionRisk(this.symbol);
+            if (!position) {
+                log.info('No position data available');
+                return;
+            }
+
+            const positionAmt = parseFloat(position.positionAmt);
+            if (positionAmt === 0) {
+                log.info('No position to close');
+                return;
+            }
+
+            const quantity = this.formatQuantity(Math.abs(positionAmt));
+
+            if (positionAmt > 0) {
+                // LONG position - close with SELL
                 await this.rest.placeOrder({
                     symbol: this.symbol,
                     side: 'SELL',
                     type: 'MARKET',
-                    quantity: this.quantity * 5,
+                    quantity,
                     reduceOnly: true,
                 });
-                log.info('Closed LONG position');
-            } catch {
-                try {
-                    await this.rest.placeOrder({
-                        symbol: this.symbol,
-                        side: 'BUY',
-                        type: 'MARKET',
-                        quantity: this.quantity * 5,
-                        reduceOnly: true,
-                    });
-                    log.info('Closed SHORT position');
-                } catch {
-                    log.info('No position to close');
-                }
+                log.info('Closed LONG position', { quantity, entryPrice: position.entryPrice });
+            } else {
+                // SHORT position - close with BUY
+                await this.rest.placeOrder({
+                    symbol: this.symbol,
+                    side: 'BUY',
+                    type: 'MARKET',
+                    quantity,
+                    reduceOnly: true,
+                });
+                log.info('Closed SHORT position', { quantity, entryPrice: position.entryPrice });
             }
 
             // Reset entry tracking
@@ -336,6 +486,26 @@ export class MicroGridStrategy {
     private async handleBuyFill(fillPrice: number, qty: number): Promise<void> {
         // If we had a previous SHORT entry (sell), this buy completes the trade
         if (this.lastEntrySide === 'SELL' && this.lastEntryPrice > 0) {
+            // Calculate fee-aware P&L
+            const pnl = this.calculateNetPnL(
+                this.lastEntryPrice,
+                fillPrice,
+                this.lastEntryQty,
+                'SHORT'
+            );
+
+            // Update daily P&L tracking
+            this.dailyPnL += pnl.netPnL;
+
+            // Update consecutive losses tracking
+            if (pnl.isProfit) {
+                this.consecutiveLosses = 0;
+            } else {
+                this.consecutiveLosses++;
+            }
+
+            const result = pnl.isProfit ? 'WIN' : 'LOSS';
+
             // Start and immediately complete the trade
             this.state.startTrade({
                 entryTime: Date.now() - 1000, // Slightly in past
@@ -345,10 +515,18 @@ export class MicroGridStrategy {
                 tpPrice: this.lastEntryPrice * (1 - this.spreadGapPercent),
                 slPrice: this.lastEntryPrice * (1 + this.spreadGapPercent * 2),
             });
-            // Complete with profit (we sold high, bought low)
-            const result = fillPrice < this.lastEntryPrice ? 'WIN' : 'LOSS';
             this.state.completeTrade(fillPrice, result);
-            log.info(`SHORT trade completed: Entry ${this.lastEntryPrice} -> Exit ${fillPrice} = ${result}`);
+
+            log.info(`SHORT trade completed`, {
+                entry: this.lastEntryPrice,
+                exit: fillPrice,
+                result,
+                grossPnL: pnl.grossPnL.toFixed(4),
+                fees: pnl.fees.toFixed(4),
+                netPnL: pnl.netPnL.toFixed(4),
+                dailyPnL: this.dailyPnL.toFixed(4),
+                consecutiveLosses: this.consecutiveLosses,
+            });
         }
 
         // Record this buy as new entry for next trade
@@ -395,6 +573,26 @@ export class MicroGridStrategy {
     private async handleSellFill(fillPrice: number, qty: number): Promise<void> {
         // If we had a previous LONG entry (buy), this sell completes the trade
         if (this.lastEntrySide === 'BUY' && this.lastEntryPrice > 0) {
+            // Calculate fee-aware P&L
+            const pnl = this.calculateNetPnL(
+                this.lastEntryPrice,
+                fillPrice,
+                this.lastEntryQty,
+                'LONG'
+            );
+
+            // Update daily P&L tracking
+            this.dailyPnL += pnl.netPnL;
+
+            // Update consecutive losses tracking
+            if (pnl.isProfit) {
+                this.consecutiveLosses = 0;
+            } else {
+                this.consecutiveLosses++;
+            }
+
+            const result = pnl.isProfit ? 'WIN' : 'LOSS';
+
             // Start and immediately complete the trade
             this.state.startTrade({
                 entryTime: Date.now() - 1000, // Slightly in past
@@ -404,10 +602,18 @@ export class MicroGridStrategy {
                 tpPrice: this.lastEntryPrice * (1 + this.spreadGapPercent),
                 slPrice: this.lastEntryPrice * (1 - this.spreadGapPercent * 2),
             });
-            // Complete with profit (we bought low, sold high)
-            const result = fillPrice > this.lastEntryPrice ? 'WIN' : 'LOSS';
             this.state.completeTrade(fillPrice, result);
-            log.info(`LONG trade completed: Entry ${this.lastEntryPrice} -> Exit ${fillPrice} = ${result}`);
+
+            log.info(`LONG trade completed`, {
+                entry: this.lastEntryPrice,
+                exit: fillPrice,
+                result,
+                grossPnL: pnl.grossPnL.toFixed(4),
+                fees: pnl.fees.toFixed(4),
+                netPnL: pnl.netPnL.toFixed(4),
+                dailyPnL: this.dailyPnL.toFixed(4),
+                consecutiveLosses: this.consecutiveLosses,
+            });
         }
 
         // Record this sell as new entry for next trade
@@ -483,8 +689,12 @@ export class MicroGridStrategy {
 
         log.info('=== STARTING MICRO-GRID STRATEGY ===');
         log.info(`Spread gap: ${this.config.spreadGapPercent}%, Price range: ±${this.config.priceRangePercent}%`);
+        log.info(`Safety: Max position ${this.maxPositionSize}, Daily loss limit ${this.config.dailyLossLimitPercent}%, Maker fee ${this.config.makerFeePercent}%`);
 
         try {
+            // Initialize daily tracking
+            this.checkDailyReset();
+
             // Record initial price for range checking
             this.initialPrice = await this.getCurrentPrice();
             log.info(`Initial price: ${this.initialPrice}, Range: ${this.formatPrice(this.initialPrice * (1 - this.priceRangePercent))} - ${this.formatPrice(this.initialPrice * (1 + this.priceRangePercent))}`);
@@ -495,6 +705,19 @@ export class MicroGridStrategy {
             // Main polling loop (check orders every 2 seconds)
             while (this.isRunning && this.state.isRunning) {
                 try {
+                    // Check for new trading day
+                    this.checkDailyReset();
+
+                    // Check circuit breaker
+                    if (this.checkCircuitBreaker()) {
+                        log.error('Circuit breaker triggered! Closing positions and stopping...');
+                        await this.closePosition();
+
+                        // Wait longer while circuit breaker is active
+                        await this.sleep(60000); // 1 minute
+                        continue;
+                    }
+
                     const currentPrice = await this.getCurrentPrice();
 
                     // Check if price is within allowed range
@@ -521,13 +744,25 @@ export class MicroGridStrategy {
                     // Check for fills and handle them
                     await this.checkOrdersAndHandleFills();
 
-                    // Ensure we always have bracket orders
-                    await this.ensureBracketExists();
+                    // Check position limits before ensuring bracket exists
+                    const canOpenNew = await this.canOpenPosition();
+                    if (canOpenNew) {
+                        // Ensure we always have bracket orders
+                        await this.ensureBracketExists();
+                    } else {
+                        // Position limit reached - only allow closing orders
+                        log.warn('Position limit reached, not placing new orders until position reduced');
+                    }
 
-                    // Log status periodically
+                    // Log status periodically (every 5 completed trades)
                     if (this.tradesCompleted > 0 && this.tradesCompleted % 5 === 0) {
+                        const currentPositionSize = await this.getCurrentPositionSize();
                         log.info('Micro-grid stats', {
                             tradesCompleted: this.tradesCompleted,
+                            dailyPnL: this.dailyPnL.toFixed(4),
+                            consecutiveLosses: this.consecutiveLosses,
+                            currentPositionSize,
+                            maxPositionSize: this.maxPositionSize,
                             activeBuyOrderId: this.activeBuyOrderId,
                             activeSellOrderId: this.activeSellOrderId,
                         });
