@@ -27,11 +27,17 @@ export const TradingConfigSchema = z.object({
     orderTimeoutSeconds: z.number().int().min(5).max(300).default(30),
     logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
     // Micro-Grid strategy settings
-    spreadGapPercent: z.number().positive().default(0.08), // 0.08% spread gap
+    spreadGapPercent: z.number().positive().default(0.08), // 0.08% base spread gap
     priceRangePercent: z.number().positive().default(2), // Only operate within ±2% of initial price
     maxPositionMultiplier: z.number().int().min(1).max(50).default(10), // Max position = base qty * multiplier
     dailyLossLimitPercent: z.number().positive().default(5), // Stop trading if daily loss exceeds 5%
     makerFeePercent: z.number().min(0).default(0.02), // Maker fee rate (0.02% default)
+    // Dynamic spread settings
+    minSpreadPercent: z.number().positive().default(0.05), // Minimum spread (0.05%)
+    maxSpreadPercent: z.number().positive().default(0.3), // Maximum spread (0.3%)
+    volatilityLookbackMinutes: z.number().int().min(1).max(60).default(5), // Lookback for volatility calc
+    // Rolling price range settings
+    rollingPriceUpdateTrades: z.number().int().min(1).default(20), // Update initial price every N trades
 });
 
 export type TradingConfig = z.infer<typeof TradingConfigSchema>;
@@ -69,6 +75,10 @@ const DEFAULT_TRADING_CONFIG: TradingConfig = {
     maxPositionMultiplier: 10,
     dailyLossLimitPercent: 5,
     makerFeePercent: 0.02,
+    minSpreadPercent: 0.05,
+    maxSpreadPercent: 0.3,
+    volatilityLookbackMinutes: 5,
+    rollingPriceUpdateTrades: 20,
 };
 
 /**

@@ -61,6 +61,17 @@ export class MicroGridStrategy {
     private maxConsecutiveLosses: number = 5;
     private isCircuitBroken: boolean = false;
 
+    // === DYNAMIC SPREAD ===
+    private priceHistory: { price: number; timestamp: number }[] = [];
+    private minSpread: number;
+    private maxSpread: number;
+    private volatilityLookbackMs: number;
+    private currentSpread: number;
+
+    // === ROLLING PRICE RANGE ===
+    private tradesSinceRangeUpdate: number = 0;
+    private rollingPriceUpdateTrades: number;
+
     constructor() {
         this.config = getConfig();
         this.rest = getRestClient();
@@ -76,14 +87,23 @@ export class MicroGridStrategy {
         this.dailyLossLimit = this.config.dailyLossLimitPercent / 100; // Convert to decimal
         this.makerFeeRate = this.config.makerFeePercent / 100; // Convert to decimal
 
+        // Initialize dynamic spread parameters
+        this.minSpread = this.config.minSpreadPercent / 100;
+        this.maxSpread = this.config.maxSpreadPercent / 100;
+        this.volatilityLookbackMs = this.config.volatilityLookbackMinutes * 60 * 1000;
+        this.currentSpread = this.spreadGapPercent; // Start with base spread
+
+        // Initialize rolling price range
+        this.rollingPriceUpdateTrades = this.config.rollingPriceUpdateTrades;
+
         log.info('MicroGridStrategy initialized', {
             symbol: this.symbol,
             quantity: this.quantity,
-            spreadGapPercent: `${this.config.spreadGapPercent}%`,
+            baseSpread: `${this.config.spreadGapPercent}%`,
+            dynamicSpreadRange: `${this.config.minSpreadPercent}% - ${this.config.maxSpreadPercent}%`,
             priceRangePercent: `±${this.config.priceRangePercent}%`,
             maxPositionSize: this.maxPositionSize,
-            dailyLossLimit: `${this.config.dailyLossLimitPercent}%`,
-            makerFeePercent: `${this.config.makerFeePercent}%`,
+            rollingPriceUpdateTrades: this.rollingPriceUpdateTrades,
         });
     }
 
@@ -225,6 +245,103 @@ export class MicroGridStrategy {
         }
 
         return canOpen;
+    }
+
+    /**
+     * Add a price observation for volatility calculation
+     */
+    private addPriceObservation(price: number): void {
+        const now = Date.now();
+        this.priceHistory.push({ price, timestamp: now });
+
+        // Remove old observations outside the lookback window
+        const cutoff = now - this.volatilityLookbackMs;
+        this.priceHistory = this.priceHistory.filter(p => p.timestamp >= cutoff);
+    }
+
+    /**
+     * Calculate volatility based on recent price movements (standard deviation / mean)
+     */
+    private calculateVolatility(): number {
+        if (this.priceHistory.length < 2) {
+            return 0;
+        }
+
+        const prices = this.priceHistory.map(p => p.price);
+        const mean = prices.reduce((a, b) => a + b, 0) / prices.length;
+
+        if (mean === 0) return 0;
+
+        const squaredDiffs = prices.map(p => Math.pow(p - mean, 2));
+        const variance = squaredDiffs.reduce((a, b) => a + b, 0) / prices.length;
+        const stdDev = Math.sqrt(variance);
+
+        // Return coefficient of variation (volatility as percentage of mean)
+        return stdDev / mean;
+    }
+
+    /**
+     * Update the dynamic spread based on current volatility
+     */
+    private updateDynamicSpread(currentPrice: number): void {
+        // Add current price to history
+        this.addPriceObservation(currentPrice);
+
+        // Calculate volatility
+        const volatility = this.calculateVolatility();
+
+        if (volatility === 0) {
+            // Not enough data yet, use base spread
+            this.currentSpread = this.spreadGapPercent;
+            return;
+        }
+
+        // Scale spread based on volatility
+        // Higher volatility = wider spread to account for faster price movement
+        // Volatility multiplier: spread = baseSpread + (volatility * 10)
+        // The 10x multiplier converts small volatility values to meaningful spread adjustments
+        const volatilityAdjustedSpread = this.spreadGapPercent + (volatility * 10);
+
+        // Clamp to min/max bounds
+        this.currentSpread = Math.max(
+            this.minSpread,
+            Math.min(this.maxSpread, volatilityAdjustedSpread)
+        );
+
+        log.debug('Dynamic spread updated', {
+            volatility: (volatility * 100).toFixed(4) + '%',
+            baseSpread: (this.spreadGapPercent * 100).toFixed(4) + '%',
+            currentSpread: (this.currentSpread * 100).toFixed(4) + '%',
+        });
+    }
+
+    /**
+     * Update the rolling price range (reset initial price after N successful trades)
+     */
+    private async updateRollingPriceRange(): Promise<void> {
+        this.tradesSinceRangeUpdate++;
+
+        if (this.tradesSinceRangeUpdate >= this.rollingPriceUpdateTrades) {
+            const newInitialPrice = await this.getCurrentPrice();
+            const oldInitialPrice = this.initialPrice;
+
+            this.initialPrice = newInitialPrice;
+            this.tradesSinceRangeUpdate = 0;
+
+            log.info('Rolling price range updated', {
+                oldInitialPrice,
+                newInitialPrice,
+                newLowerBound: this.formatPrice(newInitialPrice * (1 - this.priceRangePercent)),
+                newUpperBound: this.formatPrice(newInitialPrice * (1 + this.priceRangePercent)),
+            });
+        }
+    }
+
+    /**
+     * Get the current spread (dynamic or base)
+     */
+    private getSpread(): number {
+        return this.currentSpread;
     }
 
     /**
@@ -400,10 +517,11 @@ export class MicroGridStrategy {
      */
     private async placeInitialBracket(): Promise<boolean> {
         const prices = await this.getOrderbookPrices();
-        log.info('Placing initial bracket orders', { bid: prices.bid, ask: prices.ask });
+        const spread = this.getSpread();
+        log.info('Placing initial bracket orders', { bid: prices.bid, ask: prices.ask, spread: (spread * 100).toFixed(4) + '%' });
 
-        const buyPrice = prices.bid * (1 - this.spreadGapPercent);
-        const sellPrice = prices.ask * (1 + this.spreadGapPercent);
+        const buyPrice = prices.bid * (1 - spread);
+        const sellPrice = prices.ask * (1 + spread);
 
         // Place buy order below best bid
         const buyOrder = await this.placeGTXOrder('BUY', buyPrice, this.quantity);
@@ -527,6 +645,9 @@ export class MicroGridStrategy {
                 dailyPnL: this.dailyPnL.toFixed(4),
                 consecutiveLosses: this.consecutiveLosses,
             });
+
+            // Update rolling price range on trade completion
+            await this.updateRollingPriceRange();
         }
 
         // Record this buy as new entry for next trade
@@ -544,24 +665,33 @@ export class MicroGridStrategy {
             this.activeSellOrderId = null;
         }
 
+        // Check position limits before placing new orders
+        const canOpen = await this.canOpenPosition();
+        if (!canOpen) {
+            log.warn('handleBuyFill: Not placing new orders - position limit reached');
+            return;
+        }
+
         // Get fresh orderbook prices for placement
         const prices = await this.getOrderbookPrices();
+        const spread = this.getSpread();
 
         // Place sell order above best ask (to ensure maker)
-        const newSellPrice = prices.ask * (1 + this.spreadGapPercent);
+        const newSellPrice = prices.ask * (1 + spread);
         const sellOrder = await this.placeGTXOrder('SELL', newSellPrice, this.quantity);
         if (sellOrder && sellOrder.status !== 'EXPIRED') {
             this.activeSellOrderId = sellOrder.orderId;
         }
 
         // Place new buy order below best bid (refill)
-        const newBuyPrice = prices.bid * (1 - this.spreadGapPercent);
+        const newBuyPrice = prices.bid * (1 - spread);
         const buyOrder = await this.placeGTXOrder('BUY', newBuyPrice, this.quantity);
         if (buyOrder && buyOrder.status !== 'EXPIRED') {
             this.activeBuyOrderId = buyOrder.orderId;
         }
 
         log.info('New bracket after BUY fill', {
+            spread: (spread * 100).toFixed(4) + '%',
             newSellPrice: this.formatPrice(newSellPrice),
             newBuyPrice: this.formatPrice(newBuyPrice),
         });
@@ -614,6 +744,9 @@ export class MicroGridStrategy {
                 dailyPnL: this.dailyPnL.toFixed(4),
                 consecutiveLosses: this.consecutiveLosses,
             });
+
+            // Update rolling price range on trade completion
+            await this.updateRollingPriceRange();
         }
 
         // Record this sell as new entry for next trade
@@ -631,38 +764,55 @@ export class MicroGridStrategy {
             this.activeBuyOrderId = null;
         }
 
+        // Check position limits before placing new orders
+        const canOpen = await this.canOpenPosition();
+        if (!canOpen) {
+            log.warn('handleSellFill: Not placing new orders - position limit reached');
+            return;
+        }
+
         // Get fresh orderbook prices for placement
         const prices = await this.getOrderbookPrices();
+        const spread = this.getSpread();
 
         // Place buy order below best bid (to ensure maker)
-        const newBuyPrice = prices.bid * (1 - this.spreadGapPercent);
+        const newBuyPrice = prices.bid * (1 - spread);
         const buyOrder = await this.placeGTXOrder('BUY', newBuyPrice, this.quantity);
         if (buyOrder && buyOrder.status !== 'EXPIRED') {
             this.activeBuyOrderId = buyOrder.orderId;
         }
 
         // Place new sell order above best ask (refill)
-        const newSellPrice = prices.ask * (1 + this.spreadGapPercent);
+        const newSellPrice = prices.ask * (1 + spread);
         const sellOrder = await this.placeGTXOrder('SELL', newSellPrice, this.quantity);
         if (sellOrder && sellOrder.status !== 'EXPIRED') {
             this.activeSellOrderId = sellOrder.orderId;
         }
 
         log.info('New bracket after SELL fill', {
+            spread: (spread * 100).toFixed(4) + '%',
             newBuyPrice: this.formatPrice(newBuyPrice),
             newSellPrice: this.formatPrice(newSellPrice),
         });
     }
 
     /**
-     * Ensure bracket orders exist - replace missing ones
+     * Ensure bracket orders exist - replace missing ones (with position limit check)
      */
     private async ensureBracketExists(): Promise<void> {
+        // Check position limits before placing any new orders
+        const canOpen = await this.canOpenPosition();
+        if (!canOpen) {
+            log.warn('ensureBracketExists: Skipping - position limit reached');
+            return;
+        }
+
         const prices = await this.getOrderbookPrices();
+        const spread = this.getSpread();
 
         // If no buy order, place one below best bid
         if (!this.activeBuyOrderId) {
-            const buyPrice = prices.bid * (1 - this.spreadGapPercent);
+            const buyPrice = prices.bid * (1 - spread);
             const buyOrder = await this.placeGTXOrder('BUY', buyPrice, this.quantity);
             if (buyOrder && buyOrder.status !== 'EXPIRED') {
                 this.activeBuyOrderId = buyOrder.orderId;
@@ -671,7 +821,7 @@ export class MicroGridStrategy {
 
         // If no sell order, place one above best ask
         if (!this.activeSellOrderId) {
-            const sellPrice = prices.ask * (1 + this.spreadGapPercent);
+            const sellPrice = prices.ask * (1 + spread);
             const sellOrder = await this.placeGTXOrder('SELL', sellPrice, this.quantity);
             if (sellOrder && sellOrder.status !== 'EXPIRED') {
                 this.activeSellOrderId = sellOrder.orderId;
@@ -740,6 +890,9 @@ export class MicroGridStrategy {
                         this.isPaused = false;
                         await this.placeInitialBracket();
                     }
+
+                    // Update dynamic spread based on current volatility
+                    this.updateDynamicSpread(currentPrice);
 
                     // Check for fills and handle them
                     await this.checkOrdersAndHandleFills();
