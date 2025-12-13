@@ -1,0 +1,16 @@
+{
+    "symbol": "NIGHTUSDT",
+    "quantity": 110,
+    "leverage": 5,
+    "initialDirection": "LONG",
+    "directionSwitchLosses": 3,
+    "strategy": "orderbook",
+    "entryLevel": 3,
+    "tpLevel": 8,
+    "slLevel": 18,
+    "riskRewardRatio": 2,
+    "slDistancePercent": 0.1,
+    "tpslMonitorIntervalSeconds": 5,
+    "orderTimeoutSeconds": 30,
+    "logLevel": "info"
+}

@@ -1,9 +1,9 @@
 import { getBotState } from '../trading/state';
 import { getBotManager } from '../trading/bot-manager';
-import { getConfig, loadConfig, type Config } from '../config';
+import { getConfig, saveTradingConfig, type TradingConfig } from '../config';
 import { logger } from '../utils/logger';
 import { join } from 'path';
-import { existsSync, writeFileSync, readFileSync } from 'fs';
+import { existsSync } from 'fs';
 
 const log = logger.child('DASHBOARD');
 
@@ -136,8 +136,8 @@ async function handleApiRequest(req: Request, path: string): Promise<Response> {
                     return Response.json(config, { headers });
                 }
                 if (method === 'POST') {
-                    const newConfig = await req.json() as Partial<Config>;
-                    const result = await updateEnvFile(newConfig);
+                    const newConfig = await req.json() as Partial<TradingConfig>;
+                    const result = saveTradingConfig(newConfig);
                     return Response.json(result, { headers });
                 }
                 break;
@@ -193,64 +193,4 @@ function serveStaticFile(path: string, publicDir: string): Response {
     }
 
     return new Response('Not Found', { status: 404 });
-}
-
-/**
- * Update .env file with new config values
- */
-async function updateEnvFile(newConfig: Partial<Config>): Promise<{ success: boolean; message: string }> {
-    try {
-        const envPath = join(process.cwd(), '.env');
-
-        if (!existsSync(envPath)) {
-            return { success: false, message: '.env file not found' };
-        }
-
-        let envContent = readFileSync(envPath, 'utf-8');
-
-        // Config key to env var mapping
-        const configToEnv: Record<string, string> = {
-            symbol: 'SYMBOL',
-            quantity: 'QUANTITY',
-            leverage: 'LEVERAGE',
-            initialDirection: 'INITIAL_DIRECTION',
-            directionSwitchLosses: 'DIRECTION_SWITCH_LOSSES',
-            strategy: 'STRATEGY',
-            entryLevel: 'ENTRY_LEVEL',
-            tpLevel: 'TP_LEVEL',
-            slLevel: 'SL_LEVEL',
-            riskRewardRatio: 'RISK_REWARD_RATIO',
-            slDistancePercent: 'SL_DISTANCE_PERCENT',
-            tpslMonitorIntervalSeconds: 'TPSL_MONITOR_INTERVAL_SECONDS',
-            orderTimeoutSeconds: 'ORDER_TIMEOUT_SECONDS',
-            logLevel: 'LOG_LEVEL',
-        };
-
-        // Update each config value
-        for (const [key, value] of Object.entries(newConfig)) {
-            const envKey = configToEnv[key];
-            if (envKey && value !== undefined) {
-                const regex = new RegExp(`^${envKey}=.*$`, 'm');
-                const newLine = `${envKey}=${value}`;
-
-                if (regex.test(envContent)) {
-                    envContent = envContent.replace(regex, newLine);
-                } else {
-                    envContent += `\n${newLine}`;
-                }
-            }
-        }
-
-        writeFileSync(envPath, envContent);
-
-        return {
-            success: true,
-            message: 'Config updated. Restart bot to apply changes.'
-        };
-    } catch (error) {
-        return {
-            success: false,
-            message: error instanceof Error ? error.message : 'Failed to update config'
-        };
-    }
 }

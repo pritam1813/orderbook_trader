@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { join } from 'path';
 
 // Direction enum
 export const DirectionSchema = z.enum(['LONG', 'SHORT']);
@@ -8,71 +10,124 @@ export type Direction = z.infer<typeof DirectionSchema>;
 export const StrategySchema = z.enum(['orderbook', 'risk_reward']);
 export type Strategy = z.infer<typeof StrategySchema>;
 
-// Configuration schema
-export const ConfigSchema = z.object({
-    // API credentials
-    apiKey: z.string().min(1, 'API key is required'),
-    apiSecret: z.string().min(1, 'API secret is required'),
-
-    // Environment
-    useTestnet: z.boolean().default(true),
-
-    // Trading configuration
+// Trading config schema (stored in config.json)
+export const TradingConfigSchema = z.object({
     symbol: z.string().default('BTCUSDT'),
     quantity: z.number().positive().default(0.001),
     leverage: z.number().int().min(1).max(125).default(10),
-
-    // Direction settings
     initialDirection: DirectionSchema.default('LONG'),
     directionSwitchLosses: z.number().int().min(1).default(3),
-
-    // Strategy selection
     strategy: StrategySchema.default('orderbook'),
-
-    // Orderbook strategy levels (used when strategy = 'orderbook')
     entryLevel: z.number().int().min(1).max(20).default(2),
     tpLevel: z.number().int().min(1).max(20).default(10),
     slLevel: z.number().int().min(1).max(20).default(8),
-
-    // Risk-reward strategy settings (used when strategy = 'risk_reward')
-    riskRewardRatio: z.number().positive().default(2), // TP distance = SL distance * ratio
-    slDistancePercent: z.number().positive().default(0.1), // SL distance as % of entry price
-
-    // TPSL monitor interval
-    tpslMonitorIntervalSeconds: z.number().int().min(1).max(60).default(2),
-
-    // Order timeout
+    riskRewardRatio: z.number().positive().default(2),
+    slDistancePercent: z.number().positive().default(0.1),
+    tpslMonitorIntervalSeconds: z.number().int().min(1).max(60).default(5),
     orderTimeoutSeconds: z.number().int().min(5).max(300).default(30),
-
-    // Logging
     logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+});
+
+export type TradingConfig = z.infer<typeof TradingConfigSchema>;
+
+// Full config schema (includes secrets from .env)
+export const ConfigSchema = TradingConfigSchema.extend({
+    apiKey: z.string().min(1, 'API key is required'),
+    apiSecret: z.string().min(1, 'API secret is required'),
+    useTestnet: z.boolean().default(true),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
 
-// Load configuration from environment
+// Path to config.json
+const CONFIG_FILE_PATH = join(process.cwd(), 'config.json');
+
+// Default trading config
+const DEFAULT_TRADING_CONFIG: TradingConfig = {
+    symbol: 'BTCUSDT',
+    quantity: 0.001,
+    leverage: 10,
+    initialDirection: 'LONG',
+    directionSwitchLosses: 3,
+    strategy: 'orderbook',
+    entryLevel: 2,
+    tpLevel: 10,
+    slLevel: 8,
+    riskRewardRatio: 2,
+    slDistancePercent: 0.1,
+    tpslMonitorIntervalSeconds: 5,
+    orderTimeoutSeconds: 30,
+    logLevel: 'info',
+};
+
+/**
+ * Load trading config from config.json
+ */
+function loadTradingConfig(): TradingConfig {
+    try {
+        if (existsSync(CONFIG_FILE_PATH)) {
+            const fileContent = readFileSync(CONFIG_FILE_PATH, 'utf-8');
+            const parsed = JSON.parse(fileContent);
+            return TradingConfigSchema.parse(parsed);
+        }
+    } catch (error) {
+        console.warn('Failed to load config.json, using defaults:', error);
+    }
+    
+    // Create default config file if it doesn't exist
+    saveTradingConfig(DEFAULT_TRADING_CONFIG);
+    return DEFAULT_TRADING_CONFIG;
+}
+
+/**
+ * Save trading config to config.json
+ */
+export function saveTradingConfig(config: Partial<TradingConfig>): { success: boolean; message: string } {
+    try {
+        // Load existing config and merge with new values
+        let existingConfig = DEFAULT_TRADING_CONFIG;
+        if (existsSync(CONFIG_FILE_PATH)) {
+            try {
+                const fileContent = readFileSync(CONFIG_FILE_PATH, 'utf-8');
+                existingConfig = { ...DEFAULT_TRADING_CONFIG, ...JSON.parse(fileContent) };
+            } catch {
+                // Use defaults if file is corrupted
+            }
+        }
+
+        const mergedConfig = { ...existingConfig, ...config };
+        const validated = TradingConfigSchema.parse(mergedConfig);
+        
+        writeFileSync(CONFIG_FILE_PATH, JSON.stringify(validated, null, 4), 'utf-8');
+        
+        // Reset cached config so next getConfig() picks up changes
+        resetConfig();
+        
+        return { success: true, message: 'Config saved successfully. Restart bot to apply changes.' };
+    } catch (error) {
+        return { 
+            success: false, 
+            message: error instanceof Error ? error.message : 'Failed to save config' 
+        };
+    }
+}
+
+/**
+ * Load full configuration (secrets from .env + trading params from config.json)
+ */
 export function loadConfig(): Config {
-    const rawConfig = {
+    // Load secrets from environment
+    const secrets = {
         apiKey: process.env.BINANCE_API_KEY || '',
         apiSecret: process.env.BINANCE_API_SECRET || '',
         useTestnet: process.env.USE_TESTNET !== 'false',
-        symbol: process.env.SYMBOL || 'BTCUSDT',
-        quantity: parseFloat(process.env.QUANTITY || '0.001'),
-        leverage: parseInt(process.env.LEVERAGE || '10', 10),
-        initialDirection: (process.env.INITIAL_DIRECTION || 'LONG') as Direction,
-        directionSwitchLosses: parseInt(process.env.DIRECTION_SWITCH_LOSSES || '3', 10),
-        strategy: (process.env.STRATEGY || 'orderbook') as Strategy,
-        entryLevel: parseInt(process.env.ENTRY_LEVEL || '2', 10),
-        tpLevel: parseInt(process.env.TP_LEVEL || '10', 10),
-        slLevel: parseInt(process.env.SL_LEVEL || '8', 10),
-        tpslMonitorIntervalSeconds: parseInt(process.env.TPSL_MONITOR_INTERVAL_SECONDS || '2', 10),
-        riskRewardRatio: parseFloat(process.env.RISK_REWARD_RATIO || '2'),
-        slDistancePercent: parseFloat(process.env.SL_DISTANCE_PERCENT || '0.1'),
-        orderTimeoutSeconds: parseInt(process.env.ORDER_TIMEOUT_SECONDS || '30', 10),
-        logLevel: (process.env.LOG_LEVEL || 'info') as Config['logLevel'],
     };
 
-    return ConfigSchema.parse(rawConfig);
+    // Load trading config from config.json
+    const tradingConfig = loadTradingConfig();
+
+    // Merge and validate
+    return ConfigSchema.parse({ ...secrets, ...tradingConfig });
 }
 
 // API endpoints
