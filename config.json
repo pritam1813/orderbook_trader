@@ -2,15 +2,17 @@
     "symbol": "NIGHTUSDT",
     "quantity": 110,
     "leverage": 5,
-    "initialDirection": "LONG",
+    "initialDirection": "SHORT",
     "directionSwitchLosses": 3,
-    "strategy": "orderbook",
-    "entryLevel": 3,
+    "strategy": "micro_grid",
+    "entryLevel": 2,
     "tpLevel": 8,
     "slLevel": 18,
     "riskRewardRatio": 2,
     "slDistancePercent": 0.1,
     "tpslMonitorIntervalSeconds": 5,
     "orderTimeoutSeconds": 30,
-    "logLevel": "info"
+    "logLevel": "info",
+    "spreadGapPercent": 0.1,
+    "priceRangePercent": 2
 }

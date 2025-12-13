@@ -7,7 +7,7 @@ export const DirectionSchema = z.enum(['LONG', 'SHORT']);
 export type Direction = z.infer<typeof DirectionSchema>;
 
 // Strategy enum
-export const StrategySchema = z.enum(['orderbook', 'risk_reward']);
+export const StrategySchema = z.enum(['orderbook', 'risk_reward', 'micro_grid']);
 export type Strategy = z.infer<typeof StrategySchema>;
 
 // Trading config schema (stored in config.json)
@@ -26,6 +26,9 @@ export const TradingConfigSchema = z.object({
     tpslMonitorIntervalSeconds: z.number().int().min(1).max(60).default(5),
     orderTimeoutSeconds: z.number().int().min(5).max(300).default(30),
     logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+    // Micro-Grid strategy settings
+    spreadGapPercent: z.number().positive().default(0.08), // 0.08% spread gap
+    priceRangePercent: z.number().positive().default(2), // Only operate within ±2% of initial price
 });
 
 export type TradingConfig = z.infer<typeof TradingConfigSchema>;
@@ -58,6 +61,8 @@ const DEFAULT_TRADING_CONFIG: TradingConfig = {
     tpslMonitorIntervalSeconds: 5,
     orderTimeoutSeconds: 30,
     logLevel: 'info',
+    spreadGapPercent: 0.08,
+    priceRangePercent: 2,
 };
 
 /**
@@ -73,7 +78,7 @@ function loadTradingConfig(): TradingConfig {
     } catch (error) {
         console.warn('Failed to load config.json, using defaults:', error);
     }
-    
+
     // Create default config file if it doesn't exist
     saveTradingConfig(DEFAULT_TRADING_CONFIG);
     return DEFAULT_TRADING_CONFIG;
@@ -97,17 +102,17 @@ export function saveTradingConfig(config: Partial<TradingConfig>): { success: bo
 
         const mergedConfig = { ...existingConfig, ...config };
         const validated = TradingConfigSchema.parse(mergedConfig);
-        
+
         writeFileSync(CONFIG_FILE_PATH, JSON.stringify(validated, null, 4), 'utf-8');
-        
+
         // Reset cached config so next getConfig() picks up changes
         resetConfig();
-        
+
         return { success: true, message: 'Config saved successfully. Restart bot to apply changes.' };
     } catch (error) {
-        return { 
-            success: false, 
-            message: error instanceof Error ? error.message : 'Failed to save config' 
+        return {
+            success: false,
+            message: error instanceof Error ? error.message : 'Failed to save config'
         };
     }
 }

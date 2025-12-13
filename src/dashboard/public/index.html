@@ -144,6 +144,7 @@
                             <select name="strategy" id="cfg-strategy">
                                 <option value="orderbook">Orderbook</option>
                                 <option value="risk_reward">Risk-Reward</option>
+                                <option value="micro_grid">Micro-Grid</option>
                             </select>
                         </div>
                         <div class="config-row">
@@ -185,6 +186,21 @@
                             <label>SL Distance %</label>
                             <input type="number" step="0.01" min="0.01" name="slDistancePercent" id="cfg-sl-percent">
                         </div>
+                    </div>
+
+                    <div class="config-group microgrid-config">
+                        <h3>Micro-Grid Strategy</h3>
+                        <div class="config-row">
+                            <label>Spread Gap %</label>
+                            <input type="number" step="0.01" min="0.04" name="spreadGapPercent" id="cfg-spread-gap">
+                        </div>
+                        <div class="config-row">
+                            <label>Price Range %</label>
+                            <input type="number" step="0.5" min="0.5" max="10" name="priceRangePercent"
+                                id="cfg-price-range">
+                        </div>
+                        <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px;">Pauses trading if
+                            price moves ±X% from start</p>
                     </div>
 
                     <div class="config-group">

@@ -1,22 +1,30 @@
 import { TradingBot } from './bot';
-import { loadConfig } from '../config';
+import { MicroGridStrategy } from './micro-grid';
+import { loadConfig, getConfig } from '../config';
 import { getBotState } from './state';
 import { logger } from '../utils/logger';
 
 const log = logger.child('BOT_MANAGER');
 
+// Common interface for bot/strategy
+interface Runnable {
+    initialize(): Promise<void>;
+    run(): Promise<void>;
+    stop(): Promise<void>;
+}
+
 /**
  * Singleton bot manager that handles starting/stopping the trading bot
- * Allows restart with fresh config
+ * Supports multiple strategies: TradingBot (orderbook/risk_reward) and MicroGridStrategy
  */
 class BotManager {
-    private currentBot: TradingBot | null = null;
+    private currentBot: Runnable | null = null;
     private isStarting: boolean = false;
 
     /**
      * Start the trading bot
      * If already running, returns false
-     * Reloads config from .env before starting
+     * Reloads config before starting
      */
     async startBot(): Promise<{ success: boolean; message: string }> {
         const state = getBotState();
@@ -30,12 +38,19 @@ class BotManager {
             this.isStarting = true;
             log.info('Starting bot...');
 
-            // Reload config from .env to pick up any changes
+            // Reload config to pick up any changes
             loadConfig();
-            log.info('Config reloaded');
+            const config = getConfig();
+            log.info('Config reloaded', { strategy: config.strategy });
 
-            // Create new bot instance
-            this.currentBot = new TradingBot();
+            // Create appropriate bot based on strategy
+            if (config.strategy === 'micro_grid') {
+                log.info('Using MicroGridStrategy');
+                this.currentBot = new MicroGridStrategy();
+            } else {
+                log.info('Using TradingBot', { strategy: config.strategy });
+                this.currentBot = new TradingBot();
+            }
 
             // Initialize and start
             await this.currentBot.initialize();
@@ -47,7 +62,7 @@ class BotManager {
             });
 
             this.isStarting = false;
-            return { success: true, message: 'Bot started successfully' };
+            return { success: true, message: `Bot started with ${config.strategy} strategy` };
 
         } catch (error) {
             this.isStarting = false;
@@ -61,7 +76,7 @@ class BotManager {
 
     /**
      * Stop the trading bot
-     * Signals the bot to stop after current trade cycle completes
+     * Signals the bot to stop after current cycle completes
      */
     async stopBot(): Promise<{ success: boolean; message: string }> {
         const state = getBotState();
@@ -82,7 +97,7 @@ class BotManager {
 
             return {
                 success: true,
-                message: 'Bot stop signal sent. The bot will stop after current trade cycle completes.'
+                message: 'Bot stop signal sent. The bot will stop after current cycle completes.'
             };
 
         } catch (error) {
@@ -97,7 +112,7 @@ class BotManager {
     /**
      * Get current bot instance
      */
-    getBot(): TradingBot | null {
+    getBot(): Runnable | null {
         return this.currentBot;
     }
 }
@@ -111,3 +126,4 @@ export function getBotManager(): BotManager {
     }
     return instance;
 }
+

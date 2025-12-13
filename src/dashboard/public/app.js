@@ -103,7 +103,7 @@ async function saveConfig(e) {
         // Convert numbers
         if (['quantity', 'leverage', 'entryLevel', 'tpLevel', 'slLevel',
             'riskRewardRatio', 'slDistancePercent', 'orderTimeoutSeconds',
-            'tpslMonitorIntervalSeconds', 'directionSwitchLosses'].includes(key)) {
+            'tpslMonitorIntervalSeconds', 'directionSwitchLosses', 'spreadGapPercent', 'priceRangePercent'].includes(key)) {
             config[key] = parseFloat(value);
         } else {
             config[key] = value;
