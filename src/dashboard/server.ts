@@ -1,9 +1,9 @@
 import { getBotState } from '../trading/state';
 import { getBotManager } from '../trading/bot-manager';
 import { getConfig, saveTradingConfig, type TradingConfig } from '../config';
-import { logger } from '../utils/logger';
+import { logger, Logger } from '../utils/logger';
 import { join } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 
 const log = logger.child('DASHBOARD');
 
@@ -155,6 +155,66 @@ async function handleApiRequest(req: Request, path: string): Promise<Response> {
                     const botManager = getBotManager();
                     const result = await botManager.startBot();
                     return Response.json(result, { headers });
+                }
+                break;
+
+            case '/api/logs':
+                // List all available log files
+                if (method === 'GET') {
+                    const logsDir = 'logs';
+                    if (!existsSync(logsDir)) {
+                        return Response.json({ files: [] }, { headers });
+                    }
+
+                    const files = readdirSync(logsDir)
+                        .filter(file => file.endsWith('.log'))
+                        .map(file => {
+                            const filePath = join(logsDir, file);
+                            const stats = statSync(filePath);
+                            return {
+                                name: file,
+                                size: stats.size,
+                                created: stats.birthtime.toISOString(),
+                                modified: stats.mtime.toISOString(),
+                            };
+                        })
+                        .sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime()); // Newest first
+
+                    return Response.json({
+                        files,
+                        currentLogFile: Logger.getLogFilePath()?.replace(/\\/g, '/')
+                    }, { headers });
+                }
+                break;
+
+            case '/api/logs/download':
+                // Download a specific log file
+                if (method === 'GET') {
+                    const url = new URL(req.url);
+                    const fileName = url.searchParams.get('file');
+
+                    if (!fileName) {
+                        return Response.json({ error: 'File name required' }, { status: 400, headers });
+                    }
+
+                    // Security: Only allow .log files from logs directory
+                    if (!fileName.endsWith('.log') || fileName.includes('..') || fileName.includes('/') || fileName.includes('\\')) {
+                        return Response.json({ error: 'Invalid file name' }, { status: 400, headers });
+                    }
+
+                    const filePath = join('logs', fileName);
+                    if (!existsSync(filePath)) {
+                        return Response.json({ error: 'File not found' }, { status: 404, headers });
+                    }
+
+                    const content = readFileSync(filePath, 'utf-8');
+                    return new Response(content, {
+                        headers: {
+                            'Content-Type': 'text/plain; charset=utf-8',
+                            'Content-Disposition': `attachment; filename="${fileName}"`,
+                            'Access-Control-Allow-Origin': '*',
+                        },
+                    });
                 }
                 break;
 

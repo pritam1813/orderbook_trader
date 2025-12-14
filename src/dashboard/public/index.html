@@ -232,6 +232,32 @@
                 </div>
                 <div class="logs-container" id="logs-container"></div>
             </section>
+
+            <!-- Log Files Download -->
+            <section class="panel logfiles-panel">
+                <h2>📁 Log Files</h2>
+                <div class="logs-controls">
+                    <button id="refresh-logs" class="btn btn-secondary">🔄 Refresh</button>
+                    <span id="current-log" class="current-log-indicator"></span>
+                </div>
+                <div class="table-container">
+                    <table class="trades-table logs-table">
+                        <thead>
+                            <tr>
+                                <th>File Name</th>
+                                <th>Size</th>
+                                <th>Created</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logfiles-body">
+                            <tr>
+                                <td colspan="4" class="empty">Loading...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
         </main>
     </div>
 

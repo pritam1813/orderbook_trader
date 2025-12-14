@@ -31,6 +31,9 @@ const elements = {
     startBot: document.getElementById('start-bot'),
     stopBot: document.getElementById('stop-bot'),
     stopMessage: document.getElementById('stop-message'),
+    logfilesBody: document.getElementById('logfiles-body'),
+    refreshLogs: document.getElementById('refresh-logs'),
+    currentLog: document.getElementById('current-log'),
 };
 
 // State
@@ -50,6 +53,10 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.clearLogs.addEventListener('click', clearLogs);
     elements.startBot.addEventListener('click', startBot);
     elements.stopBot.addEventListener('click', stopBot);
+    elements.refreshLogs.addEventListener('click', loadLogFiles);
+
+    // Load log files
+    loadLogFiles();
 });
 
 // API Functions
@@ -91,6 +98,62 @@ async function loadConfig() {
     } catch (err) {
         console.error('Failed to load config:', err);
     }
+}
+
+async function loadLogFiles() {
+    try {
+        const res = await fetch(`${API_BASE}/api/logs`);
+        const data = await res.json();
+        updateLogFiles(data.files, data.currentLogFile);
+    } catch (err) {
+        console.error('Failed to load log files:', err);
+        elements.logfilesBody.innerHTML = '<tr><td colspan="4" class="empty">Failed to load log files</td></tr>';
+    }
+}
+
+function updateLogFiles(files, currentLogFile) {
+    if (!files || files.length === 0) {
+        elements.logfilesBody.innerHTML = '<tr><td colspan="4" class="empty">No log files yet</td></tr>';
+        elements.currentLog.textContent = '';
+        return;
+    }
+
+    // Show current log file indicator
+    if (currentLogFile) {
+        const currentFileName = currentLogFile.split('/').pop().split('\\').pop();
+        elements.currentLog.innerHTML = `📝 Current: <strong>${currentFileName}</strong>`;
+    }
+
+    elements.logfilesBody.innerHTML = files.map(file => {
+        const isCurrentLog = currentLogFile && currentLogFile.includes(file.name);
+        const sizeKB = (file.size / 1024).toFixed(1);
+        const created = new Date(file.created).toLocaleString();
+
+        return `
+            <tr class="${isCurrentLog ? 'current-log-row' : ''}">
+                <td>
+                    ${isCurrentLog ? '📝 ' : ''}${file.name}
+                </td>
+                <td>${sizeKB} KB</td>
+                <td>${created}</td>
+                <td>
+                    <button class="btn btn-primary btn-sm" onclick="downloadLogFile('${file.name}')">
+                        ⬇️ Download
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function downloadLogFile(fileName) {
+    // Create a link and trigger download
+    const link = document.createElement('a');
+    link.href = `${API_BASE}/api/logs/download?file=${encodeURIComponent(fileName)}`;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
 
 async function saveConfig(e) {

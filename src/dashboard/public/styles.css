@@ -435,6 +435,44 @@ body {
     }
 }
 
+/* Log Files Panel */
+.logfiles-panel {
+    grid-column: span 2;
+}
+
+@media (max-width: 1200px) {
+    .logfiles-panel {
+        grid-column: span 1;
+    }
+}
+
+.current-log-indicator {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.current-log-indicator strong {
+    color: var(--accent-green);
+}
+
+.current-log-row {
+    background: rgba(63, 185, 80, 0.1) !important;
+}
+
+.current-log-row td:first-child {
+    color: var(--accent-green);
+    font-weight: 600;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 0.75rem;
+}
+
+.logs-table {
+    font-size: 0.85rem;
+}
+
 .logs-controls {
     display: flex;
     gap: 16px;
