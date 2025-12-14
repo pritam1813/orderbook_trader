@@ -195,11 +195,15 @@ export class BinanceRestClient {
         });
         return OrderbookSnapshotSchema.parse(data);
     }
-
     /**
-     * Get user's trade history for a symbol
+     * Get user's trade history for a symbol (single page)
+     * Supports time-based pagination with startTime/endTime
      */
-    async getUserTrades(symbol: string, limit: number = 500): Promise<Array<{
+    async getUserTrades(symbol: string, limit: number = 500, options?: {
+        fromId?: number;
+        startTime?: number;
+        endTime?: number;
+    }): Promise<Array<{
         symbol: string;
         id: number;
         orderId: number;
@@ -214,10 +218,21 @@ export class BinanceRestClient {
         buyer: boolean;
         maker: boolean;
     }>> {
-        const data = await this.signedRequest<Array<Record<string, unknown>>>('GET', '/fapi/v1/userTrades', {
+        const params: Record<string, string | number | boolean | undefined> = {
             symbol,
             limit,
-        });
+        };
+        if (options?.fromId !== undefined) {
+            params.fromId = options.fromId;
+        }
+        if (options?.startTime !== undefined) {
+            params.startTime = options.startTime;
+        }
+        if (options?.endTime !== undefined) {
+            params.endTime = options.endTime;
+        }
+
+        const data = await this.signedRequest<Array<Record<string, unknown>>>('GET', '/fapi/v1/userTrades', params);
         return data.map(trade => ({
             symbol: String(trade.symbol),
             id: Number(trade.id),
@@ -233,6 +248,99 @@ export class BinanceRestClient {
             buyer: Boolean(trade.buyer),
             maker: Boolean(trade.maker),
         }));
+    }
+
+    /**
+     * Get ALL user's trades for a symbol (paginated - fetches all pages)
+     * Returns trades in ascending order by ID (oldest first)
+     */
+    async getAllUserTrades(symbol: string): Promise<Array<{
+        symbol: string;
+        id: number;
+        orderId: number;
+        side: string;
+        price: string;
+        qty: string;
+        quoteQty: string;
+        realizedPnl: string;
+        commission: string;
+        commissionAsset: string;
+        time: number;
+        buyer: boolean;
+        maker: boolean;
+    }>> {
+        const allTrades: Array<{
+            symbol: string;
+            id: number;
+            orderId: number;
+            side: string;
+            price: string;
+            qty: string;
+            quoteQty: string;
+            realizedPnl: string;
+            commission: string;
+            commissionAsset: string;
+            time: number;
+            buyer: boolean;
+            maker: boolean;
+        }> = [];
+
+        const limit = 1000; // Max allowed by API
+        let hasMore = true;
+        let iteration = 0;
+        let endTime: number | undefined = undefined; // Will be set to oldest trade time - 1
+
+        log.info(`Starting to fetch all trades for ${symbol}...`);
+
+        while (hasMore) {
+            iteration++;
+            log.info(`Pagination iteration ${iteration}: fetching with endTime=${endTime ?? 'undefined'}`);
+
+            const trades = await this.getUserTrades(symbol, limit, endTime ? { endTime } : undefined);
+            log.info(`Iteration ${iteration}: received ${trades.length} trades`);
+
+            if (trades.length === 0) {
+                log.info(`Iteration ${iteration}: no trades returned, stopping`);
+                hasMore = false;
+            } else {
+                // Find oldest trade time in this batch
+                let oldestTime = Number.MAX_SAFE_INTEGER;
+                let newestTime = 0;
+                for (const trade of trades) {
+                    if (trade.time < oldestTime) oldestTime = trade.time;
+                    if (trade.time > newestTime) newestTime = trade.time;
+                }
+                log.info(`Iteration ${iteration}: time range ${new Date(oldestTime).toISOString()} - ${new Date(newestTime).toISOString()}`);
+
+                allTrades.push(...trades);
+
+                // If we got less than the limit, we've reached the end
+                if (trades.length < limit) {
+                    log.info(`Iteration ${iteration}: got ${trades.length} < ${limit}, stopping`);
+                    hasMore = false;
+                } else {
+                    // Set endTime to oldest trade time - 1ms to get older trades
+                    endTime = oldestTime - 1;
+                    log.info(`Iteration ${iteration}: setting next endTime to ${new Date(endTime).toISOString()}`);
+                }
+            }
+
+            // Safety limit to prevent infinite loops
+            if (allTrades.length > 50000) {
+                log.warn('Trade history limit reached (50,000 trades)');
+                hasMore = false;
+            }
+
+            // Safety: max 100 iterations
+            if (iteration >= 100) {
+                log.warn('Max pagination iterations reached');
+                hasMore = false;
+            }
+        }
+
+        log.info(`Fetched total ${allTrades.length} trades for ${symbol} in ${iteration} iterations`);
+
+        return allTrades;
     }
 
     // ===== User Data Stream Endpoints =====

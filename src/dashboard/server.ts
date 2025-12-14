@@ -172,7 +172,7 @@ async function handleApiRequest(req: Request, path: string): Promise<Response> {
                         const { getRestClient } = await import('../api/rest');
                         const rest = getRestClient();
                         await rest.syncTime();
-                        const trades = await rest.getUserTrades(symbol, 500);
+                        const trades = await rest.getAllUserTrades(symbol);
 
                         // Calculate aggregate stats from user's trades
                         let totalVolume = 0;
