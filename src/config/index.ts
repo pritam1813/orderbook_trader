@@ -39,6 +39,11 @@ export const TradingConfigSchema = z.object({
     volatilityLookbackMinutes: z.number().int().min(1).max(60).default(5), // Lookback for volatility calc
     // Rolling price range settings
     rollingPriceUpdateTrades: z.number().int().min(1).default(20), // Update initial price every N trades
+    // Position reduction settings
+    emergencyCloseDeviationPercent: z.number().positive().default(1), // Emergency market close if price deviates > this %
+    stabilizationWaitMinutes: z.number().positive().default(5), // Wait time after emergency close (minutes)
+    reduceOrderTimeoutSeconds: z.number().int().min(5).max(120).default(30), // Timeout before repricing reduce order
+    positionResumeThresholdPercent: z.number().positive().max(100).default(50), // Resume trading after position reduced by X%
 });
 
 export type TradingConfig = z.infer<typeof TradingConfigSchema>;
@@ -82,6 +87,10 @@ const DEFAULT_TRADING_CONFIG: TradingConfig = {
     maxSpreadPercent: 0.3,
     volatilityLookbackMinutes: 5,
     rollingPriceUpdateTrades: 20,
+    emergencyCloseDeviationPercent: 1,
+    stabilizationWaitMinutes: 5,
+    reduceOrderTimeoutSeconds: 30,
+    positionResumeThresholdPercent: 50,
 };
 
 /**

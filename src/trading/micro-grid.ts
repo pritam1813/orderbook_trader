@@ -73,6 +73,22 @@ export class MicroGridStrategy {
     private tradesSinceRangeUpdate: number = 0;
     private rollingPriceUpdateTrades: number;
 
+    // === POSITION REDUCTION ===
+    private isReducingPosition: boolean = false;
+    private reductionStartPrice: number = 0;
+    private reductionStartPositionSize: number = 0;
+    private reduceOnlyOrderId: number | null = null;
+    private reduceOnlyOrderPlacedAt: number = 0;
+    private reduceOnlyOrderSide: 'BUY' | 'SELL' | null = null;
+    private isWaitingForStabilization: boolean = false;
+    private stabilizationStartTime: number = 0;
+
+    // Position reduction config (initialized in constructor)
+    private emergencyCloseDeviation: number;
+    private stabilizationWaitMs: number;
+    private reduceOrderTimeoutMs: number;
+    private positionResumeThreshold: number;
+
     constructor() {
         this.config = getConfig();
         this.rest = getRestClient();
@@ -98,6 +114,12 @@ export class MicroGridStrategy {
         // Initialize rolling price range
         this.rollingPriceUpdateTrades = this.config.rollingPriceUpdateTrades;
 
+        // Initialize position reduction config
+        this.emergencyCloseDeviation = this.config.emergencyCloseDeviationPercent / 100;
+        this.stabilizationWaitMs = this.config.stabilizationWaitMinutes * 60 * 1000;
+        this.reduceOrderTimeoutMs = this.config.reduceOrderTimeoutSeconds * 1000;
+        this.positionResumeThreshold = this.config.positionResumeThresholdPercent / 100;
+
         log.info('MicroGridStrategy initialized', {
             symbol: this.symbol,
             quantity: this.quantity,
@@ -105,7 +127,8 @@ export class MicroGridStrategy {
             dynamicSpreadRange: `${this.config.minSpreadPercent}% - ${this.config.maxSpreadPercent}%`,
             priceRangePercent: `±${this.config.priceRangePercent}%`,
             maxPositionSize: this.maxPositionSize,
-            rollingPriceUpdateTrades: this.rollingPriceUpdateTrades,
+            emergencyCloseDeviation: `${this.config.emergencyCloseDeviationPercent}%`,
+            stabilizationWait: `${this.config.stabilizationWaitMinutes} min`,
         });
     }
 
@@ -344,6 +367,305 @@ export class MicroGridStrategy {
      */
     private getSpread(): number {
         return this.currentSpread;
+    }
+
+    // ==========================================
+    // === POSITION REDUCTION METHODS ===
+    // ==========================================
+
+    /**
+     * Get current position direction (LONG/SHORT) and size
+     */
+    private async getPositionInfo(): Promise<{ side: 'LONG' | 'SHORT' | 'NONE'; size: number; entryPrice: number }> {
+        try {
+            const position = await this.rest.getPositionRisk(this.symbol);
+            if (position) {
+                const posAmt = parseFloat(position.positionAmt);
+                if (posAmt > 0) {
+                    return { side: 'LONG', size: posAmt, entryPrice: parseFloat(position.entryPrice) };
+                } else if (posAmt < 0) {
+                    return { side: 'SHORT', size: Math.abs(posAmt), entryPrice: parseFloat(position.entryPrice) };
+                }
+            }
+        } catch (error) {
+            log.error('Error getting position info:', error);
+        }
+        return { side: 'NONE', size: 0, entryPrice: 0 };
+    }
+
+    /**
+     * Enter position reduction mode - cancel all orders and start reducing
+     */
+    private async startPositionReduction(): Promise<void> {
+        if (this.isReducingPosition) return;
+
+        const posInfo = await this.getPositionInfo();
+        if (posInfo.side === 'NONE' || posInfo.size === 0) {
+            log.info('No position to reduce');
+            return;
+        }
+
+        log.warn('=== ENTERING POSITION REDUCTION MODE ===', {
+            positionSide: posInfo.side,
+            positionSize: posInfo.size,
+            entryPrice: posInfo.entryPrice,
+        });
+
+        // Cancel ALL open orders first
+        await this.cancelAllOrders();
+
+        // Record reduction start state
+        this.isReducingPosition = true;
+        this.reductionStartPrice = await this.getCurrentPrice();
+        this.reductionStartPositionSize = posInfo.size;
+        this.reduceOnlyOrderSide = posInfo.side === 'LONG' ? 'SELL' : 'BUY';
+
+        log.info('Position reduction started', {
+            reductionStartPrice: this.reductionStartPrice,
+            reductionStartPositionSize: this.reductionStartPositionSize,
+            reduceOnlyOrderSide: this.reduceOnlyOrderSide,
+        });
+
+        // Place first reduce-only order
+        await this.placeReduceOnlyOrder();
+    }
+
+    /**
+     * Place a reduce-only LIMIT order for one chunk (base quantity)
+     */
+    private async placeReduceOnlyOrder(): Promise<void> {
+        const prices = await this.getOrderbookPrices();
+
+        // Determine price based on side - we want to close at market
+        // For LONG position (SELL to close): place at bid price (to get filled quickly but as maker)
+        // For SHORT position (BUY to close): place at ask price
+        let price: number;
+        if (this.reduceOnlyOrderSide === 'SELL') {
+            price = prices.bid; // Sell at bid for faster fill
+        } else {
+            price = prices.ask; // Buy at ask for faster fill
+        }
+
+        const formattedPrice = this.formatPrice(price);
+        const formattedQty = this.formatQuantity(this.quantity);
+
+        log.info(`Placing reduce-only ${this.reduceOnlyOrderSide} LIMIT order`, {
+            price: formattedPrice,
+            quantity: formattedQty,
+        });
+
+        try {
+            const order = await this.rest.placeOrder({
+                symbol: this.symbol,
+                side: this.reduceOnlyOrderSide!,
+                type: 'LIMIT',
+                price: formattedPrice,
+                quantity: formattedQty,
+                reduceOnly: true,
+                timeInForce: 'GTC',
+            });
+
+            if (order && order.status !== 'EXPIRED' && order.status !== 'CANCELED') {
+                this.reduceOnlyOrderId = order.orderId;
+                this.reduceOnlyOrderPlacedAt = Date.now();
+                log.info('Reduce-only order placed', { orderId: order.orderId, status: order.status });
+            } else {
+                log.warn('Reduce-only order rejected', { status: order?.status });
+            }
+        } catch (error) {
+            log.error('Error placing reduce-only order:', error);
+        }
+    }
+
+    /**
+     * Check if reduce-only order filled, handle result, place next chunk if needed
+     */
+    private async checkReduceOnlyOrderStatus(): Promise<void> {
+        if (!this.reduceOnlyOrderId) return;
+
+        try {
+            const order = await this.rest.queryOrder(this.symbol, this.reduceOnlyOrderId);
+
+            if (order.status === 'FILLED') {
+                const fillPrice = parseFloat(order.avgPrice);
+                const fillQty = parseFloat(order.executedQty);
+
+                // Calculate P&L for this reduction chunk (using taker fee since we're closing urgently)
+                const direction = this.reduceOnlyOrderSide === 'SELL' ? 'LONG' : 'SHORT';
+                const pnl = this.calculateNetPnL(
+                    this.lastEntryPrice || fillPrice,
+                    fillPrice,
+                    fillQty,
+                    direction
+                );
+
+                // Update daily P&L
+                this.dailyPnL += pnl.netPnL;
+
+                log.info('Reduce-only order FILLED', {
+                    fillPrice,
+                    fillQty,
+                    netPnL: pnl.netPnL.toFixed(4),
+                    dailyPnL: this.dailyPnL.toFixed(4),
+                });
+
+                this.reduceOnlyOrderId = null;
+
+                // Check if we've reduced enough to resume
+                const currentPos = await this.getPositionInfo();
+                const reductionPercent = 1 - (currentPos.size / this.reductionStartPositionSize);
+
+                log.info('Position reduction progress', {
+                    originalSize: this.reductionStartPositionSize,
+                    currentSize: currentPos.size,
+                    reductionPercent: (reductionPercent * 100).toFixed(1) + '%',
+                    targetPercent: (this.positionResumeThreshold * 100) + '%',
+                });
+
+                if (currentPos.size === 0) {
+                    // Position fully closed
+                    log.info('Position fully closed, exiting reduction mode');
+                    this.exitReductionMode();
+                } else if (reductionPercent >= this.positionResumeThreshold) {
+                    // Reached threshold, can resume trading
+                    log.info(`Position reduced by ${(reductionPercent * 100).toFixed(1)}%, resuming trading`);
+                    this.exitReductionMode();
+                } else {
+                    // Continue reducing - place next chunk
+                    await this.placeReduceOnlyOrder();
+                }
+
+            } else if (order.status === 'CANCELED' || order.status === 'EXPIRED') {
+                log.warn(`Reduce-only order ${order.status}, will replace`);
+                this.reduceOnlyOrderId = null;
+                await this.placeReduceOnlyOrder();
+
+            } else {
+                // Order still open - check if we need to reprice
+                const timeSincePlaced = Date.now() - this.reduceOnlyOrderPlacedAt;
+                if (timeSincePlaced > this.reduceOrderTimeoutMs) {
+                    log.info('Reduce-only order timeout, repricing...');
+                    await this.cancelReduceOnlyOrder();
+                    await this.placeReduceOnlyOrder();
+                }
+            }
+        } catch (error) {
+            log.error('Error checking reduce-only order:', error);
+        }
+    }
+
+    /**
+     * Cancel current reduce-only order
+     */
+    private async cancelReduceOnlyOrder(): Promise<void> {
+        if (!this.reduceOnlyOrderId) return;
+
+        try {
+            await this.rest.cancelOrder(this.symbol, this.reduceOnlyOrderId);
+            log.info('Reduce-only order cancelled', { orderId: this.reduceOnlyOrderId });
+        } catch {
+            // Ignore if already cancelled
+        }
+        this.reduceOnlyOrderId = null;
+    }
+
+    /**
+     * Check if price has deviated too far - trigger emergency close
+     */
+    private async checkEmergencyClose(): Promise<boolean> {
+        const currentPrice = await this.getCurrentPrice();
+        const priceDeviation = Math.abs(currentPrice - this.reductionStartPrice) / this.reductionStartPrice;
+
+        if (priceDeviation >= this.emergencyCloseDeviation) {
+            log.error('EMERGENCY: Price deviation exceeded threshold!', {
+                reductionStartPrice: this.reductionStartPrice,
+                currentPrice,
+                deviation: (priceDeviation * 100).toFixed(2) + '%',
+                threshold: (this.emergencyCloseDeviation * 100) + '%',
+            });
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Emergency close all positions with MARKET order
+     */
+    private async emergencyCloseAll(): Promise<void> {
+        log.error('=== EMERGENCY MARKET CLOSE ===');
+
+        // Cancel any open orders
+        await this.cancelAllOrders();
+        await this.cancelReduceOnlyOrder();
+
+        // Close position with market order
+        await this.closePosition();
+
+        // Enter stabilization wait
+        this.isReducingPosition = false;
+        this.isWaitingForStabilization = true;
+        this.stabilizationStartTime = Date.now();
+
+        log.warn('Entering stabilization wait period', {
+            waitMinutes: this.config.stabilizationWaitMinutes,
+        });
+    }
+
+    /**
+     * Check if stabilization wait period is complete
+     */
+    private checkStabilizationComplete(): boolean {
+        if (!this.isWaitingForStabilization) return true;
+
+        const elapsed = Date.now() - this.stabilizationStartTime;
+        if (elapsed >= this.stabilizationWaitMs) {
+            log.info('Stabilization wait complete, resuming trading');
+            this.isWaitingForStabilization = false;
+            this.stabilizationStartTime = 0;
+            return true;
+        }
+
+        const remaining = Math.ceil((this.stabilizationWaitMs - elapsed) / 1000);
+        if (remaining % 30 === 0) { // Log every 30 seconds
+            log.info(`Stabilization wait: ${remaining} seconds remaining`);
+        }
+        return false;
+    }
+
+    /**
+     * Exit position reduction mode
+     */
+    private exitReductionMode(): void {
+        this.isReducingPosition = false;
+        this.reductionStartPrice = 0;
+        this.reductionStartPositionSize = 0;
+        this.reduceOnlyOrderId = null;
+        this.reduceOnlyOrderSide = null;
+        log.info('Exited position reduction mode');
+    }
+
+    /**
+     * Main position reduction handler - called each loop iteration when in reduction mode
+     */
+    private async handlePositionReduction(): Promise<void> {
+        // Check for emergency close condition first
+        if (await this.checkEmergencyClose()) {
+            await this.emergencyCloseAll();
+            return;
+        }
+
+        // Handle reduce-only order status
+        await this.checkReduceOnlyOrderStatus();
+
+        // If no active order and still reducing, place new one
+        if (this.isReducingPosition && !this.reduceOnlyOrderId) {
+            const posInfo = await this.getPositionInfo();
+            if (posInfo.size > 0) {
+                await this.placeReduceOnlyOrder();
+            } else {
+                this.exitReductionMode();
+            }
+        }
     }
 
     /**
@@ -947,20 +1269,40 @@ export class MicroGridStrategy {
                         await this.placeInitialBracket();
                     }
 
+                    // === POSITION REDUCTION & STABILIZATION HANDLING ===
+
+                    // Check if waiting for stabilization after emergency close
+                    if (this.isWaitingForStabilization) {
+                        if (!this.checkStabilizationComplete()) {
+                            await this.sleep(2000);
+                            continue; // Still waiting, skip normal trading
+                        }
+                        // Stabilization complete, will resume normal trading below
+                    }
+
+                    // If in position reduction mode, handle it
+                    if (this.isReducingPosition) {
+                        await this.handlePositionReduction();
+                        await this.sleep(2000);
+                        continue; // Don't do normal trading while reducing
+                    }
+
                     // Update dynamic spread based on current volatility
                     this.updateDynamicSpread(currentPrice);
 
                     // Check for fills and handle them
                     await this.checkOrdersAndHandleFills();
 
-                    // Check position limits before ensuring bracket exists
+                    // Check position limits - trigger reduction if exceeded
                     const canOpenNew = await this.canOpenPosition();
                     if (canOpenNew) {
                         // Ensure we always have bracket orders
                         await this.ensureBracketExists();
                     } else {
-                        // Position limit reached - only allow closing orders
-                        log.warn('Position limit reached, not placing new orders until position reduced');
+                        // Position limit reached - START POSITION REDUCTION
+                        log.warn('Position limit reached, entering position reduction mode');
+                        await this.startPositionReduction();
+                        continue; // Skip rest of loop, enter reduction mode next iteration
                     }
 
                     // Log status periodically (every 5 completed trades)

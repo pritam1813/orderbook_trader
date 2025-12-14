@@ -296,6 +296,35 @@
                             <input type="number" step="0.001" min="0" max="0.1" name="makerFeePercent"
                                 id="cfg-maker-fee">
                         </div>
+                        <div class="config-row">
+                            <label>Taker Fee %</label>
+                            <input type="number" step="0.001" min="0" max="0.1" name="takerFeePercent"
+                                id="cfg-taker-fee">
+                        </div>
+                    </div>
+
+                    <div class="config-group microgrid-config">
+                        <h3>Position Reduction</h3>
+                        <div class="config-row">
+                            <label>Emergency Close Deviation %</label>
+                            <input type="number" step="0.1" min="0.5" max="5" name="emergencyCloseDeviationPercent"
+                                id="cfg-emergency-deviation">
+                        </div>
+                        <div class="config-row">
+                            <label>Stabilization Wait (min)</label>
+                            <input type="number" step="1" min="1" max="30" name="stabilizationWaitMinutes"
+                                id="cfg-stabilization-wait">
+                        </div>
+                        <div class="config-row">
+                            <label>Reduce Order Timeout (s)</label>
+                            <input type="number" step="5" min="5" max="120" name="reduceOrderTimeoutSeconds"
+                                id="cfg-reduce-timeout">
+                        </div>
+                        <div class="config-row">
+                            <label>Position Resume Threshold %</label>
+                            <input type="number" step="5" min="10" max="100" name="positionResumeThresholdPercent"
+                                id="cfg-resume-threshold">
+                        </div>
                     </div>
 
                     <div class="config-group">
