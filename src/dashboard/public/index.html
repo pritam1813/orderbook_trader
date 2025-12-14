@@ -191,16 +191,51 @@
                     <div class="config-group microgrid-config">
                         <h3>Micro-Grid Strategy</h3>
                         <div class="config-row">
-                            <label>Spread Gap %</label>
-                            <input type="number" step="0.01" min="0.04" name="spreadGapPercent" id="cfg-spread-gap">
+                            <label>Base Spread %</label>
+                            <input type="number" step="0.01" min="0.01" name="spreadGapPercent" id="cfg-spread-gap">
+                        </div>
+                        <div class="config-row">
+                            <label>Min Spread %</label>
+                            <input type="number" step="0.01" min="0.01" name="minSpreadPercent" id="cfg-min-spread">
+                        </div>
+                        <div class="config-row">
+                            <label>Max Spread %</label>
+                            <input type="number" step="0.01" min="0.01" name="maxSpreadPercent" id="cfg-max-spread">
                         </div>
                         <div class="config-row">
                             <label>Price Range %</label>
                             <input type="number" step="0.5" min="0.5" max="10" name="priceRangePercent"
                                 id="cfg-price-range">
                         </div>
-                        <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px;">Pauses trading if
-                            price moves ±X% from start</p>
+                        <div class="config-row">
+                            <label>Volatility Lookback (min)</label>
+                            <input type="number" step="1" min="1" max="60" name="volatilityLookbackMinutes"
+                                id="cfg-volatility-lookback">
+                        </div>
+                        <div class="config-row">
+                            <label>Rolling Price Update Trades</label>
+                            <input type="number" step="1" min="1" max="100" name="rollingPriceUpdateTrades"
+                                id="cfg-rolling-update">
+                        </div>
+                    </div>
+
+                    <div class="config-group microgrid-config">
+                        <h3>Micro-Grid Risk Management</h3>
+                        <div class="config-row">
+                            <label>Max Position Multiplier</label>
+                            <input type="number" step="1" min="1" max="50" name="maxPositionMultiplier"
+                                id="cfg-max-pos-mult">
+                        </div>
+                        <div class="config-row">
+                            <label>Daily Loss Limit %</label>
+                            <input type="number" step="0.5" min="1" max="20" name="dailyLossLimitPercent"
+                                id="cfg-daily-loss">
+                        </div>
+                        <div class="config-row">
+                            <label>Maker Fee %</label>
+                            <input type="number" step="0.001" min="0" max="0.1" name="makerFeePercent"
+                                id="cfg-maker-fee">
+                        </div>
                     </div>
 
                     <div class="config-group">

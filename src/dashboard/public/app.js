@@ -166,7 +166,9 @@ async function saveConfig(e) {
         // Convert numbers
         if (['quantity', 'leverage', 'entryLevel', 'tpLevel', 'slLevel',
             'riskRewardRatio', 'slDistancePercent', 'orderTimeoutSeconds',
-            'tpslMonitorIntervalSeconds', 'directionSwitchLosses', 'spreadGapPercent', 'priceRangePercent'].includes(key)) {
+            'tpslMonitorIntervalSeconds', 'directionSwitchLosses', 'spreadGapPercent', 'priceRangePercent',
+            'maxPositionMultiplier', 'dailyLossLimitPercent', 'makerFeePercent',
+            'minSpreadPercent', 'maxSpreadPercent', 'volatilityLookbackMinutes', 'rollingPriceUpdateTrades'].includes(key)) {
             config[key] = parseFloat(value);
         } else {
             config[key] = value;
@@ -415,6 +417,19 @@ function populateConfig(config) {
     document.getElementById('cfg-sl-percent').value = config.slDistancePercent || '';
     document.getElementById('cfg-timeout').value = config.orderTimeoutSeconds || '';
     document.getElementById('cfg-monitor-interval').value = config.tpslMonitorIntervalSeconds || '';
+
+    // Micro-Grid Strategy
+    document.getElementById('cfg-spread-gap').value = config.spreadGapPercent || '';
+    document.getElementById('cfg-min-spread').value = config.minSpreadPercent || '';
+    document.getElementById('cfg-max-spread').value = config.maxSpreadPercent || '';
+    document.getElementById('cfg-price-range').value = config.priceRangePercent || '';
+    document.getElementById('cfg-volatility-lookback').value = config.volatilityLookbackMinutes || '';
+    document.getElementById('cfg-rolling-update').value = config.rollingPriceUpdateTrades || '';
+
+    // Micro-Grid Risk Management
+    document.getElementById('cfg-max-pos-mult').value = config.maxPositionMultiplier || '';
+    document.getElementById('cfg-daily-loss').value = config.dailyLossLimitPercent || '';
+    document.getElementById('cfg-maker-fee').value = config.makerFeePercent || '';
 }
 
 function addLog(log) {
