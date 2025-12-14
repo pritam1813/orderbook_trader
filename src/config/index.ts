@@ -44,6 +44,8 @@ export const TradingConfigSchema = z.object({
     stabilizationWaitMinutes: z.number().positive().default(5), // Wait time after emergency close (minutes)
     reduceOrderTimeoutSeconds: z.number().int().min(5).max(120).default(30), // Timeout before repricing reduce order
     positionResumeThresholdPercent: z.number().positive().max(100).default(50), // Resume trading after position reduced by X%
+    // Pause auto-reset settings
+    pauseAutoResetMinutes: z.number().int().min(1).max(60).default(10), // Auto-reset initial price after X minutes paused
 });
 
 export type TradingConfig = z.infer<typeof TradingConfigSchema>;
@@ -91,6 +93,7 @@ const DEFAULT_TRADING_CONFIG: TradingConfig = {
     stabilizationWaitMinutes: 5,
     reduceOrderTimeoutSeconds: 30,
     positionResumeThresholdPercent: 50,
+    pauseAutoResetMinutes: 10,
 };
 
 /**

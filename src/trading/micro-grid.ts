@@ -41,6 +41,8 @@ export class MicroGridStrategy {
     // Price range bounds
     private initialPrice: number = 0;
     private isPaused: boolean = false;
+    private pauseStartTime: number = 0;
+    private pauseAutoResetMs: number;
 
     // Stats
     private tradesCompleted: number = 0;
@@ -119,6 +121,9 @@ export class MicroGridStrategy {
         this.stabilizationWaitMs = this.config.stabilizationWaitMinutes * 60 * 1000;
         this.reduceOrderTimeoutMs = this.config.reduceOrderTimeoutSeconds * 1000;
         this.positionResumeThreshold = this.config.positionResumeThresholdPercent / 100;
+
+        // Initialize pause auto-reset config
+        this.pauseAutoResetMs = this.config.pauseAutoResetMinutes * 60 * 1000;
 
         log.info('MicroGridStrategy initialized', {
             symbol: this.symbol,
@@ -570,21 +575,48 @@ export class MicroGridStrategy {
     }
 
     /**
-     * Check if price has deviated too far - trigger emergency close
+     * Check if price has deviated too far in UNFAVORABLE direction - trigger emergency close
+     * Only triggers when price moves against us, not when it moves favorably
      */
     private async checkEmergencyClose(): Promise<boolean> {
         const currentPrice = await this.getCurrentPrice();
-        const priceDeviation = Math.abs(currentPrice - this.reductionStartPrice) / this.reductionStartPrice;
+        const priceChange = (currentPrice - this.reductionStartPrice) / this.reductionStartPrice;
 
-        if (priceDeviation >= this.emergencyCloseDeviation) {
-            log.error('EMERGENCY: Price deviation exceeded threshold!', {
+        // Determine if the movement is unfavorable based on position direction
+        // - If we're reducing a LONG (selling), unfavorable = price dropping (losing more)
+        // - If we're reducing a SHORT (buying), unfavorable = price rising (losing more)
+        let isUnfavorable = false;
+        if (this.reduceOnlyOrderSide === 'SELL') {
+            // Reducing LONG position - unfavorable if price dropped
+            isUnfavorable = priceChange < 0;
+        } else if (this.reduceOnlyOrderSide === 'BUY') {
+            // Reducing SHORT position - unfavorable if price rose
+            isUnfavorable = priceChange > 0;
+        }
+
+        const absDeviation = Math.abs(priceChange);
+
+        // Only emergency close if movement is unfavorable AND exceeds threshold
+        if (isUnfavorable && absDeviation >= this.emergencyCloseDeviation) {
+            log.error('EMERGENCY: Unfavorable price deviation exceeded threshold!', {
                 reductionStartPrice: this.reductionStartPrice,
                 currentPrice,
-                deviation: (priceDeviation * 100).toFixed(2) + '%',
+                priceChange: (priceChange * 100).toFixed(2) + '%',
+                direction: priceChange > 0 ? 'UP' : 'DOWN',
+                positionSide: this.reduceOnlyOrderSide === 'SELL' ? 'LONG' : 'SHORT',
                 threshold: (this.emergencyCloseDeviation * 100) + '%',
             });
             return true;
         }
+
+        // If price moved favorably, log it but don't emergency close
+        if (!isUnfavorable && absDeviation >= this.emergencyCloseDeviation) {
+            log.info('Price moved favorably during reduction, continuing with limit orders', {
+                priceChange: (priceChange * 100).toFixed(2) + '%',
+                direction: priceChange > 0 ? 'UP' : 'DOWN',
+            });
+        }
+
         return false;
     }
 
@@ -853,6 +885,12 @@ export class MicroGridStrategy {
             this.lastEntrySide = null;
             this.lastEntryPrice = 0;
             this.lastEntryQty = 0;
+
+            // Reset reduction mode state (in case we were in reduction mode)
+            if (this.isReducingPosition) {
+                log.info('Exiting reduction mode due to force close');
+                this.exitReductionMode();
+            }
         } catch (error) {
             log.error('Error closing position:', error);
         }
@@ -1254,7 +1292,36 @@ export class MicroGridStrategy {
                             log.warn(`PRICE OUT OF RANGE! Current: ${currentPrice}, Initial: ${this.initialPrice}`);
                             log.warn('Pausing strategy, cancelling orders, closing position...');
                             this.isPaused = true;
+                            this.pauseStartTime = Date.now(); // Start tracking pause duration
                             await this.closePosition('OUT_OF_RANGE');
+                        }
+
+                        // Check if we've been paused long enough to auto-reset
+                        const pauseDuration = Date.now() - this.pauseStartTime;
+                        if (pauseDuration >= this.pauseAutoResetMs) {
+                            const oldInitialPrice = this.initialPrice;
+                            this.initialPrice = currentPrice;
+                            this.isPaused = false;
+                            this.pauseStartTime = 0;
+
+                            log.warn('AUTO-RESET: Price range updated after prolonged pause', {
+                                oldInitialPrice,
+                                newInitialPrice: this.initialPrice,
+                                pauseDurationMinutes: Math.round(pauseDuration / 60000),
+                                newLowerBound: this.formatPrice(this.initialPrice * (1 - this.priceRangePercent)),
+                                newUpperBound: this.formatPrice(this.initialPrice * (1 + this.priceRangePercent)),
+                            });
+
+                            // Resume trading with new price range
+                            await this.placeInitialBracket();
+                            continue;
+                        }
+
+                        // Log remaining pause time periodically
+                        const remainingMs = this.pauseAutoResetMs - pauseDuration;
+                        const remainingSec = Math.ceil(remainingMs / 1000);
+                        if (remainingSec % 60 === 0) { // Log every minute
+                            log.info(`Paused - auto-reset in ${Math.ceil(remainingSec / 60)} minutes`);
                         }
 
                         // Wait longer while paused
@@ -1266,6 +1333,7 @@ export class MicroGridStrategy {
                     if (this.isPaused) {
                         log.info('Price back in range, resuming trading...');
                         this.isPaused = false;
+                        this.pauseStartTime = 0;
                         await this.placeInitialBracket();
                     }
 
