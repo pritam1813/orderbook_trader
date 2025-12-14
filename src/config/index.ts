@@ -51,8 +51,9 @@ export const ConfigSchema = TradingConfigSchema.extend({
 
 export type Config = z.infer<typeof ConfigSchema>;
 
-// Path to config.json
+// Path to config files
 const CONFIG_FILE_PATH = join(process.cwd(), 'config.json');
+const LOCAL_CONFIG_FILE_PATH = join(process.cwd(), 'config.local.json');
 
 // Default trading config
 const DEFAULT_TRADING_CONFIG: TradingConfig = {
@@ -82,55 +83,94 @@ const DEFAULT_TRADING_CONFIG: TradingConfig = {
 };
 
 /**
- * Load trading config from config.json
+ * Load trading config from config.json + config.local.json
+ * config.local.json overrides config.json (for deployment-specific settings)
  */
 function loadTradingConfig(): TradingConfig {
+    let baseConfig = { ...DEFAULT_TRADING_CONFIG };
+
+    // 1. Load base config from config.json
     try {
         if (existsSync(CONFIG_FILE_PATH)) {
             const fileContent = readFileSync(CONFIG_FILE_PATH, 'utf-8');
             const parsed = JSON.parse(fileContent);
-            return TradingConfigSchema.parse(parsed);
+            baseConfig = { ...baseConfig, ...parsed };
         }
     } catch (error) {
-        console.warn('Failed to load config.json, using defaults:', error);
+        console.warn('Failed to load config.json:', error);
     }
 
-    // Create default config file if it doesn't exist
-    saveTradingConfig(DEFAULT_TRADING_CONFIG);
-    return DEFAULT_TRADING_CONFIG;
+    // 2. Load local overrides from config.local.json (if exists)
+    try {
+        if (existsSync(LOCAL_CONFIG_FILE_PATH)) {
+            const localContent = readFileSync(LOCAL_CONFIG_FILE_PATH, 'utf-8');
+            const localParsed = JSON.parse(localContent);
+            baseConfig = { ...baseConfig, ...localParsed };
+            console.log('✓ Loaded local config overrides from config.local.json');
+        }
+    } catch (error) {
+        console.warn('Failed to load config.local.json:', error);
+    }
+
+    // Validate merged config
+    return TradingConfigSchema.parse(baseConfig);
 }
 
 /**
- * Save trading config to config.json
+ * Save trading config to config.local.json (deployment-specific overrides)
+ * This file is gitignored, so it won't conflict with git pulls
  */
 export function saveTradingConfig(config: Partial<TradingConfig>): { success: boolean; message: string } {
     try {
-        // Load existing config and merge with new values
-        let existingConfig = DEFAULT_TRADING_CONFIG;
-        if (existsSync(CONFIG_FILE_PATH)) {
+        // Load existing local config if it exists, otherwise start fresh
+        let existingLocalConfig: Partial<TradingConfig> = {};
+        if (existsSync(LOCAL_CONFIG_FILE_PATH)) {
             try {
-                const fileContent = readFileSync(CONFIG_FILE_PATH, 'utf-8');
-                existingConfig = { ...DEFAULT_TRADING_CONFIG, ...JSON.parse(fileContent) };
+                const fileContent = readFileSync(LOCAL_CONFIG_FILE_PATH, 'utf-8');
+                existingLocalConfig = JSON.parse(fileContent);
             } catch {
-                // Use defaults if file is corrupted
+                // Ignore parse errors, start fresh
             }
         }
 
-        const mergedConfig = { ...existingConfig, ...config };
-        const validated = TradingConfigSchema.parse(mergedConfig);
+        // Merge with new values
+        const mergedConfig = { ...existingLocalConfig, ...config };
 
-        writeFileSync(CONFIG_FILE_PATH, JSON.stringify(validated, null, 4), 'utf-8');
+        // Validate the full merged config (base + local) before saving
+        const baseConfig = loadBaseConfig();
+        const fullMerged = { ...baseConfig, ...mergedConfig };
+        TradingConfigSchema.parse(fullMerged); // Validate
+
+        // Write only to config.local.json
+        writeFileSync(LOCAL_CONFIG_FILE_PATH, JSON.stringify(mergedConfig, null, 4), 'utf-8');
 
         // Reset cached config so next getConfig() picks up changes
         resetConfig();
 
-        return { success: true, message: 'Config saved successfully. Restart bot to apply changes.' };
+        return { success: true, message: 'Config saved to config.local.json. Restart bot to apply changes.' };
     } catch (error) {
         return {
             success: false,
             message: error instanceof Error ? error.message : 'Failed to save config'
         };
     }
+}
+
+/**
+ * Load base config from config.json (without local overrides)
+ */
+function loadBaseConfig(): TradingConfig {
+    let baseConfig = { ...DEFAULT_TRADING_CONFIG };
+    try {
+        if (existsSync(CONFIG_FILE_PATH)) {
+            const fileContent = readFileSync(CONFIG_FILE_PATH, 'utf-8');
+            const parsed = JSON.parse(fileContent);
+            baseConfig = { ...baseConfig, ...parsed };
+        }
+    } catch {
+        // Use defaults
+    }
+    return TradingConfigSchema.parse(baseConfig);
 }
 
 /**
