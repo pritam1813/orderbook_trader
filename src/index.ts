@@ -7,15 +7,16 @@ const log = logger;
 
 async function main() {
     try {
+        // Initialize file logging - creates a new log file for each bot run
+        Logger.initFileLogging();
+
         // Load and validate configuration
         const config = getConfig();
 
         // Set log level from config
         log.setLevel(config.logLevel);
 
-        log.info('='.repeat(50));
-        log.info('Binance Orderbook Scalping Bot');
-        log.info('='.repeat(50));
+        log.banner('Binance Orderbook Scalping Bot');
         log.info('Configuration:', {
             symbol: config.symbol,
             quantity: config.quantity,
@@ -31,7 +32,7 @@ async function main() {
             directionSwitchLosses: config.directionSwitchLosses,
             testnet: config.useTestnet,
         });
-        log.info('='.repeat(50));
+        log.separator();
 
         if (!config.apiKey || !config.apiSecret) {
             log.error('API credentials not configured. Please set BINANCE_API_KEY and BINANCE_API_SECRET in .env');

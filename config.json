@@ -1,7 +1,7 @@
 {
-    "symbol": "NIGHTUSDT",
-    "quantity": 200,
-    "leverage": 7,
+    "symbol": "BTCUSDT",
+    "quantity": 0.002,
+    "leverage": 2,
     "initialDirection": "SHORT",
     "directionSwitchLosses": 3,
     "strategy": "micro_grid",
@@ -19,7 +19,7 @@
     "dailyLossLimitPercent": 5,
     "makerFeePercent": 0.02,
     "minSpreadPercent": 0.05,
-    "maxSpreadPercent": 0.2,
+    "maxSpreadPercent": 0.1,
     "volatilityLookbackMinutes": 5,
     "rollingPriceUpdateTrades": 20
 }
