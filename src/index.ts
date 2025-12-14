@@ -46,16 +46,8 @@ async function main() {
         // Set up log broadcasting to dashboard
         Logger.setBroadcastCallback(broadcastLog);
 
-        // Start the bot via bot manager
-        const botManager = getBotManager();
-        const startResult = await botManager.startBot();
-
-        if (!startResult.success) {
-            log.error('Failed to start bot:', startResult.message);
-            process.exit(1);
-        }
-
-        log.info('Bot is running. Press Ctrl+C to stop.');
+        log.info('Dashboard ready. Start the bot from the web interface.');
+        log.info(`Open http://localhost:${dashboardPort} in your browser.`);
 
         // Keep the process running
         await new Promise(() => { }); // This will never resolve, keeps the process alive
