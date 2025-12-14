@@ -127,6 +127,48 @@ body {
     color: var(--text-muted);
 }
 
+/* Volume Lookup Panel */
+.volume-lookup-panel {
+    grid-column: span 1;
+}
+
+.lookup-input-group {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.lookup-input-group input {
+    flex: 1;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 10px 14px;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+}
+
+.lookup-input-group input:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+}
+
+.volume-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+
+@media (max-width: 768px) {
+    .volume-stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.hidden {
+    display: none !important;
+}
+
 /* Status Grid */
 .status-grid,
 .stats-grid {

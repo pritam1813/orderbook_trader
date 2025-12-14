@@ -51,6 +51,47 @@
                 </div>
             </section>
 
+            <!-- Volume Lookup Panel -->
+            <section class="panel volume-lookup-panel">
+                <h2>📊 My Trading Volume</h2>
+                <div class="volume-lookup-form">
+                    <div class="lookup-input-group">
+                        <input type="text" id="volume-symbol" placeholder="Enter symbol (e.g., BTCUSDT)"
+                            autocomplete="off">
+                        <button class="btn btn-primary" id="volume-search">Search</button>
+                    </div>
+                    <div id="volume-result" class="volume-result hidden">
+                        <div class="volume-stats-grid">
+                            <div class="stat-card">
+                                <span class="stat-label">Total Trades</span>
+                                <span class="stat-value" id="ticker-trades">--</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-label">Volume (USDT)</span>
+                                <span class="stat-value" id="ticker-volume">--</span>
+                            </div>
+                            <div class="stat-card highlight">
+                                <span class="stat-label">Net P&L</span>
+                                <span class="stat-value" id="ticker-pnl">--</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-label">Fees Paid</span>
+                                <span class="stat-value fee" id="ticker-fees">--</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-label">Buy Volume</span>
+                                <span class="stat-value" id="ticker-buy">--</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-label">Sell Volume</span>
+                                <span class="stat-value" id="ticker-sell">--</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="volume-error" class="config-message error hidden"></div>
+                </div>
+            </section>
+
             <!-- Statistics Panel -->
             <section class="panel stats-panel">
                 <h2>📈 Statistics</h2>

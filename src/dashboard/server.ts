@@ -158,6 +158,68 @@ async function handleApiRequest(req: Request, path: string): Promise<Response> {
                 }
                 break;
 
+            // Volume lookup - get user's trading volume for any symbol
+            case '/api/ticker':
+                if (method === 'GET') {
+                    const url = new URL(req.url);
+                    const symbol = url.searchParams.get('symbol')?.toUpperCase();
+
+                    if (!symbol) {
+                        return Response.json({ error: 'Symbol parameter required' }, { status: 400, headers });
+                    }
+
+                    try {
+                        const { getRestClient } = await import('../api/rest');
+                        const rest = getRestClient();
+                        await rest.syncTime();
+                        const trades = await rest.getUserTrades(symbol, 500);
+
+                        // Calculate aggregate stats from user's trades
+                        let totalVolume = 0;
+                        let totalVolumeUSDT = 0;
+                        let totalPnL = 0;
+                        let totalFees = 0;
+                        let buyVolume = 0;
+                        let sellVolume = 0;
+
+                        for (const trade of trades) {
+                            const qty = parseFloat(trade.qty);
+                            const quoteQty = parseFloat(trade.quoteQty);
+                            const pnl = parseFloat(trade.realizedPnl);
+                            const fee = parseFloat(trade.commission);
+
+                            totalVolume += qty;
+                            totalVolumeUSDT += quoteQty;
+                            totalPnL += pnl;
+                            totalFees += fee;
+
+                            if (trade.side === 'BUY') {
+                                buyVolume += qty;
+                            } else {
+                                sellVolume += qty;
+                            }
+                        }
+
+                        return Response.json({
+                            symbol,
+                            tradeCount: trades.length,
+                            totalVolume: totalVolume.toFixed(6),
+                            totalVolumeUSDT: totalVolumeUSDT.toFixed(2),
+                            buyVolume: buyVolume.toFixed(6),
+                            sellVolume: sellVolume.toFixed(6),
+                            totalPnL: totalPnL.toFixed(4),
+                            totalFees: totalFees.toFixed(4),
+                            netPnL: (totalPnL - totalFees).toFixed(4),
+                            oldestTrade: trades.length > 0 ? trades[trades.length - 1]?.time : null,
+                            newestTrade: trades.length > 0 ? trades[0]?.time : null,
+                        }, { headers });
+                    } catch (error) {
+                        const message = error instanceof Error ? error.message : 'Failed to fetch trades';
+                        return Response.json({ error: message }, { status: 500, headers });
+                    }
+                }
+                break;
+
             case '/api/logs':
                 // List all available log files
                 if (method === 'GET') {

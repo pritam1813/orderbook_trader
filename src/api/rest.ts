@@ -196,6 +196,45 @@ export class BinanceRestClient {
         return OrderbookSnapshotSchema.parse(data);
     }
 
+    /**
+     * Get user's trade history for a symbol
+     */
+    async getUserTrades(symbol: string, limit: number = 500): Promise<Array<{
+        symbol: string;
+        id: number;
+        orderId: number;
+        side: string;
+        price: string;
+        qty: string;
+        quoteQty: string;
+        realizedPnl: string;
+        commission: string;
+        commissionAsset: string;
+        time: number;
+        buyer: boolean;
+        maker: boolean;
+    }>> {
+        const data = await this.signedRequest<Array<Record<string, unknown>>>('GET', '/fapi/v1/userTrades', {
+            symbol,
+            limit,
+        });
+        return data.map(trade => ({
+            symbol: String(trade.symbol),
+            id: Number(trade.id),
+            orderId: Number(trade.orderId),
+            side: String(trade.side),
+            price: String(trade.price),
+            qty: String(trade.qty),
+            quoteQty: String(trade.quoteQty),
+            realizedPnl: String(trade.realizedPnl),
+            commission: String(trade.commission),
+            commissionAsset: String(trade.commissionAsset),
+            time: Number(trade.time),
+            buyer: Boolean(trade.buyer),
+            maker: Boolean(trade.maker),
+        }));
+    }
+
     // ===== User Data Stream Endpoints =====
 
     /**

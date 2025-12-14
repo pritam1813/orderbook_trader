@@ -39,6 +39,17 @@ const elements = {
     logfilesBody: document.getElementById('logfiles-body'),
     refreshLogs: document.getElementById('refresh-logs'),
     currentLog: document.getElementById('current-log'),
+    // Volume lookup
+    volumeSymbol: document.getElementById('volume-symbol'),
+    volumeSearch: document.getElementById('volume-search'),
+    volumeResult: document.getElementById('volume-result'),
+    volumeError: document.getElementById('volume-error'),
+    tickerTrades: document.getElementById('ticker-trades'),
+    tickerVolume: document.getElementById('ticker-volume'),
+    tickerPnl: document.getElementById('ticker-pnl'),
+    tickerFees: document.getElementById('ticker-fees'),
+    tickerBuy: document.getElementById('ticker-buy'),
+    tickerSell: document.getElementById('ticker-sell'),
 };
 
 // State
@@ -60,6 +71,12 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.stopBot.addEventListener('click', stopBot);
     elements.refreshLogs.addEventListener('click', loadLogFiles);
 
+    // Volume lookup
+    elements.volumeSearch.addEventListener('click', searchVolume);
+    elements.volumeSymbol.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') searchVolume();
+    });
+
     // Load log files
     loadLogFiles();
 });
@@ -72,6 +89,59 @@ async function loadStatus() {
         updateStatus(status);
     } catch (err) {
         console.error('Failed to load status:', err);
+    }
+}
+
+async function searchVolume() {
+    const symbol = elements.volumeSymbol.value.trim().toUpperCase();
+    if (!symbol) {
+        elements.volumeError.textContent = 'Please enter a symbol';
+        elements.volumeError.classList.remove('hidden');
+        elements.volumeResult.classList.add('hidden');
+        return;
+    }
+
+    elements.volumeSearch.disabled = true;
+    elements.volumeSearch.textContent = 'Loading...';
+    elements.volumeError.classList.add('hidden');
+
+    try {
+        const res = await fetch(`${API_BASE}/api/ticker?symbol=${encodeURIComponent(symbol)}`);
+        const data = await res.json();
+
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        // Format large numbers
+        const formatLargeNumber = (num) => {
+            const n = parseFloat(num);
+            if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+            if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+            if (n >= 1e3) return (n / 1e3).toFixed(2) + 'K';
+            return n.toFixed(2);
+        };
+
+        elements.tickerTrades.textContent = data.tradeCount;
+        elements.tickerVolume.textContent = '$' + formatLargeNumber(data.totalVolumeUSDT);
+
+        const pnl = parseFloat(data.netPnL);
+        elements.tickerPnl.textContent = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2);
+        elements.tickerPnl.className = 'stat-value ' + (pnl >= 0 ? 'win' : 'loss');
+
+        elements.tickerFees.textContent = '$' + parseFloat(data.totalFees).toFixed(2);
+        elements.tickerBuy.textContent = data.buyVolume;
+        elements.tickerSell.textContent = data.sellVolume;
+
+        elements.volumeResult.classList.remove('hidden');
+        elements.volumeError.classList.add('hidden');
+    } catch (err) {
+        elements.volumeError.textContent = err.message || 'Failed to fetch trade data';
+        elements.volumeError.classList.remove('hidden');
+        elements.volumeResult.classList.add('hidden');
+    } finally {
+        elements.volumeSearch.disabled = false;
+        elements.volumeSearch.textContent = 'Search';
     }
 }
 
