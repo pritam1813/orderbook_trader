@@ -242,8 +242,10 @@ async function saveConfig(e) {
         if (['quantity', 'leverage', 'entryLevel', 'tpLevel', 'slLevel',
             'riskRewardRatio', 'slDistancePercent', 'orderTimeoutSeconds',
             'tpslMonitorIntervalSeconds', 'directionSwitchLosses', 'spreadGapPercent', 'priceRangePercent',
-            'maxPositionMultiplier', 'dailyLossLimitPercent', 'makerFeePercent',
-            'minSpreadPercent', 'maxSpreadPercent', 'volatilityLookbackMinutes', 'rollingPriceUpdateTrades'].includes(key)) {
+            'maxPositionMultiplier', 'dailyLossLimitPercent', 'makerFeePercent', 'takerFeePercent',
+            'minSpreadPercent', 'maxSpreadPercent', 'volatilityLookbackMinutes', 'rollingPriceUpdateTrades',
+            'emergencyCloseDeviationPercent', 'stabilizationWaitMinutes', 'reduceOrderTimeoutSeconds',
+            'positionResumeThresholdPercent', 'pauseAutoResetMinutes'].includes(key)) {
             config[key] = parseFloat(value);
         } else {
             config[key] = value;
@@ -521,6 +523,14 @@ function populateConfig(config) {
     document.getElementById('cfg-max-pos-mult').value = config.maxPositionMultiplier || '';
     document.getElementById('cfg-daily-loss').value = config.dailyLossLimitPercent || '';
     document.getElementById('cfg-maker-fee').value = config.makerFeePercent || '';
+    document.getElementById('cfg-taker-fee').value = config.takerFeePercent || '';
+
+    // Position Reduction
+    document.getElementById('cfg-emergency-deviation').value = config.emergencyCloseDeviationPercent || '';
+    document.getElementById('cfg-stabilization-wait').value = config.stabilizationWaitMinutes || '';
+    document.getElementById('cfg-reduce-timeout').value = config.reduceOrderTimeoutSeconds || '';
+    document.getElementById('cfg-resume-threshold').value = config.positionResumeThresholdPercent || '';
+    document.getElementById('cfg-pause-reset').value = config.pauseAutoResetMinutes || '';
 }
 
 function addLog(log) {
