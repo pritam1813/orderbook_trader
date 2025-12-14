@@ -32,6 +32,7 @@ export const TradingConfigSchema = z.object({
     maxPositionMultiplier: z.number().int().min(1).max(50).default(10), // Max position = base qty * multiplier
     dailyLossLimitPercent: z.number().positive().default(5), // Stop trading if daily loss exceeds 5%
     makerFeePercent: z.number().min(0).default(0.02), // Maker fee rate (0.02% default)
+    takerFeePercent: z.number().min(0).default(0.05), // Taker fee rate (0.05% default) - for market orders
     // Dynamic spread settings
     minSpreadPercent: z.number().positive().default(0.05), // Minimum spread (0.05%)
     maxSpreadPercent: z.number().positive().default(0.3), // Maximum spread (0.3%)
@@ -76,6 +77,7 @@ const DEFAULT_TRADING_CONFIG: TradingConfig = {
     maxPositionMultiplier: 10,
     dailyLossLimitPercent: 5,
     makerFeePercent: 0.02,
+    takerFeePercent: 0.05,
     minSpreadPercent: 0.05,
     maxSpreadPercent: 0.3,
     volatilityLookbackMinutes: 5,

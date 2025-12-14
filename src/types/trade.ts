@@ -41,6 +41,11 @@ export interface TradeStats {
     totalFees: number;
     netPnl: number;
     consecutiveLosses: number;
+    // Micro-grid specific stats
+    forceCloseCount?: number;
+    forceClosePnL?: number;
+    takerFees?: number;
+    makerFees?: number;
 }
 
 /**

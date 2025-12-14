@@ -22,6 +22,11 @@ class BotStateManager extends EventEmitter {
     private _totalPnl: number = 0;
     private _totalFees: number = 0;
 
+    // Micro-grid specific stats
+    private _forceCloseCount: number = 0;
+    private _forceClosePnL: number = 0;
+    private _takerFees: number = 0;
+
     constructor() {
         super();
         const config = getConfig();
@@ -64,6 +69,11 @@ class BotStateManager extends EventEmitter {
             totalFees: this._totalFees,
             netPnl: this._totalPnl - this._totalFees,
             consecutiveLosses: this._consecutiveLosses,
+            // Micro-grid specific
+            forceCloseCount: this._forceCloseCount,
+            forceClosePnL: this._forceClosePnL,
+            takerFees: this._takerFees,
+            makerFees: this._totalFees - this._takerFees,
         };
     }
 
@@ -156,6 +166,68 @@ class BotStateManager extends EventEmitter {
      */
     resetConsecutiveLosses(): void {
         this._consecutiveLosses = 0;
+        this.emit('statsChange', this.getStats());
+    }
+
+    /**
+     * Record a force close (market order to close position)
+     * Used by micro-grid strategy when closing due to out-of-range or circuit breaker
+     */
+    addForceClose(params: {
+        direction: 'LONG' | 'SHORT';
+        entryPrice: number;
+        exitPrice: number;
+        quantity: number;
+        grossPnL: number;
+        takerFee: number;
+        netPnL: number;
+        reason: 'OUT_OF_RANGE' | 'CIRCUIT_BREAKER' | 'MANUAL_STOP';
+    }): void {
+        const { direction, entryPrice, exitPrice, quantity, grossPnL, takerFee, netPnL, reason } = params;
+
+        // Update force close specific stats
+        this._forceCloseCount++;
+        this._forceClosePnL += netPnL;
+        this._takerFees += takerFee;
+
+        // Update overall stats
+        this._totalPnl += grossPnL;
+        this._totalFees += takerFee;
+        this._totalVolume += exitPrice * quantity;
+
+        // Count as loss if negative P&L
+        if (netPnL < 0) {
+            this._totalLosses++;
+            this._consecutiveLosses++;
+        } else if (netPnL > 0) {
+            this._totalWins++;
+            this._consecutiveLosses = 0;
+        }
+
+        // Create trade record
+        const trade: TradeRecord = {
+            id: `force_close_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            entryTime: Date.now() - 1000,
+            exitTime: Date.now(),
+            direction,
+            entryPrice,
+            exitPrice,
+            quantity,
+            tpPrice: 0,
+            slPrice: 0,
+            result: netPnL >= 0 ? 'WIN' : 'LOSS',
+            pnl: grossPnL,
+            pnlAfterFees: netPnL,
+            fees: takerFee,
+        };
+
+        // Add to history
+        this._trades.unshift(trade);
+        if (this._trades.length > 100) {
+            this._trades.pop();
+        }
+
+        this.emit('tradeComplete', trade);
         this.emit('statsChange', this.getStats());
     }
 }

@@ -49,6 +49,7 @@ export class MicroGridStrategy {
     // Position limits
     private maxPositionSize: number;
     private makerFeeRate: number;
+    private takerFeeRate: number;
 
     // Daily P&L tracking
     private dailyPnL: number = 0;
@@ -86,6 +87,7 @@ export class MicroGridStrategy {
         this.maxPositionSize = this.quantity * this.config.maxPositionMultiplier;
         this.dailyLossLimit = this.config.dailyLossLimitPercent / 100; // Convert to decimal
         this.makerFeeRate = this.config.makerFeePercent / 100; // Convert to decimal
+        this.takerFeeRate = this.config.takerFeePercent / 100; // Convert to decimal (for market orders)
 
         // Initialize dynamic spread parameters
         this.minSpread = this.config.minSpreadPercent / 100;
@@ -428,8 +430,9 @@ export class MicroGridStrategy {
 
     /**
      * Close any open position (used when out of range or circuit breaker)
+     * Now tracks P&L with taker fees for market orders
      */
-    private async closePosition(): Promise<void> {
+    private async closePosition(reason: 'OUT_OF_RANGE' | 'CIRCUIT_BREAKER' | 'MANUAL_STOP' = 'MANUAL_STOP'): Promise<void> {
         try {
             // Cancel all open orders first
             await this.cancelAllOrders();
@@ -448,7 +451,13 @@ export class MicroGridStrategy {
             }
 
             const quantity = this.formatQuantity(Math.abs(positionAmt));
+            const entryPrice = parseFloat(position.entryPrice);
+            const direction: 'LONG' | 'SHORT' = positionAmt > 0 ? 'LONG' : 'SHORT';
 
+            // Get current market price for exit
+            const currentPrice = await this.getCurrentPrice();
+
+            // Place market order to close
             if (positionAmt > 0) {
                 // LONG position - close with SELL
                 await this.rest.placeOrder({
@@ -458,7 +467,6 @@ export class MicroGridStrategy {
                     quantity,
                     reduceOnly: true,
                 });
-                log.info('Closed LONG position', { quantity, entryPrice: position.entryPrice });
             } else {
                 // SHORT position - close with BUY
                 await this.rest.placeOrder({
@@ -468,8 +476,56 @@ export class MicroGridStrategy {
                     quantity,
                     reduceOnly: true,
                 });
-                log.info('Closed SHORT position', { quantity, entryPrice: position.entryPrice });
             }
+
+            // Calculate P&L with taker fees (market order = taker)
+            let grossPnL: number;
+            if (direction === 'LONG') {
+                grossPnL = (currentPrice - entryPrice) * quantity;
+            } else {
+                grossPnL = (entryPrice - currentPrice) * quantity;
+            }
+
+            // Calculate taker fees (entry was maker, exit is taker for market close)
+            const entryNotional = entryPrice * quantity;
+            const exitNotional = currentPrice * quantity;
+            const entryFee = entryNotional * this.makerFeeRate; // Original entry was maker
+            const exitFee = exitNotional * this.takerFeeRate;   // Force close is taker
+            const totalFee = entryFee + exitFee;
+            const netPnL = grossPnL - totalFee;
+
+            // Update daily P&L tracking
+            this.dailyPnL += netPnL;
+
+            // Update consecutive losses
+            if (netPnL < 0) {
+                this.consecutiveLosses++;
+            } else {
+                this.consecutiveLosses = 0;
+            }
+
+            // Record in state manager for dashboard
+            this.state.addForceClose({
+                direction,
+                entryPrice,
+                exitPrice: currentPrice,
+                quantity,
+                grossPnL,
+                takerFee: exitFee, // Only the exit taker fee
+                netPnL,
+                reason,
+            });
+
+            log.warn(`FORCE CLOSE [${reason}]`, {
+                direction,
+                entryPrice,
+                exitPrice: currentPrice,
+                quantity,
+                grossPnL: grossPnL.toFixed(4),
+                fees: totalFee.toFixed(4),
+                netPnL: netPnL.toFixed(4),
+                dailyPnL: this.dailyPnL.toFixed(4),
+            });
 
             // Reset entry tracking
             this.lastEntrySide = null;
@@ -861,7 +917,7 @@ export class MicroGridStrategy {
                     // Check circuit breaker
                     if (this.checkCircuitBreaker()) {
                         log.error('Circuit breaker triggered! Closing positions and stopping...');
-                        await this.closePosition();
+                        await this.closePosition('CIRCUIT_BREAKER');
 
                         // Wait longer while circuit breaker is active
                         await this.sleep(60000); // 1 minute
@@ -876,7 +932,7 @@ export class MicroGridStrategy {
                             log.warn(`PRICE OUT OF RANGE! Current: ${currentPrice}, Initial: ${this.initialPrice}`);
                             log.warn('Pausing strategy, cancelling orders, closing position...');
                             this.isPaused = true;
-                            await this.closePosition();
+                            await this.closePosition('OUT_OF_RANGE');
                         }
 
                         // Wait longer while paused

@@ -22,6 +22,11 @@ const elements = {
     totalPnl: document.getElementById('total-pnl'),
     totalFees: document.getElementById('total-fees'),
     netPnl: document.getElementById('net-pnl'),
+    // Micro-grid specific stats
+    forceCloseCount: document.getElementById('force-close-count'),
+    forceClosePnl: document.getElementById('force-close-pnl'),
+    makerFees: document.getElementById('maker-fees'),
+    takerFees: document.getElementById('taker-fees'),
     tradesBody: document.getElementById('trades-body'),
     logsContainer: document.getElementById('logs-container'),
     configForm: document.getElementById('config-form'),
@@ -380,6 +385,22 @@ function updateStats(stats) {
     // Color net P&L
     elements.netPnl.className = 'stat-value ' + (stats.netPnl >= 0 ? 'win' : 'loss');
     elements.totalPnl.className = 'stat-value ' + (stats.totalPnl >= 0 ? 'win' : 'loss');
+
+    // Micro-grid specific stats
+    if (elements.forceCloseCount) {
+        elements.forceCloseCount.textContent = stats.forceCloseCount || 0;
+    }
+    if (elements.forceClosePnl) {
+        const fcPnl = stats.forceClosePnL || 0;
+        elements.forceClosePnl.textContent = formatPnl(fcPnl);
+        elements.forceClosePnl.className = 'stat-value ' + (fcPnl >= 0 ? 'win' : 'loss');
+    }
+    if (elements.makerFees) {
+        elements.makerFees.textContent = formatCurrency(stats.makerFees || 0);
+    }
+    if (elements.takerFees) {
+        elements.takerFees.textContent = formatCurrency(stats.takerFees || 0);
+    }
 }
 
 function updateTrades(trades) {
