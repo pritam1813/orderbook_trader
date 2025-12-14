@@ -46,6 +46,7 @@ export const TradingConfigSchema = z.object({
     positionResumeThresholdPercent: z.number().positive().max(100).default(50), // Resume trading after position reduced by X%
     // Pause auto-reset settings
     pauseAutoResetMinutes: z.number().int().min(1).max(60).default(10), // Auto-reset initial price after X minutes paused
+    priceRangeResumeBufferPercent: z.number().min(0).max(50).default(0.5), // Buffer % - price must be this far inside range before resuming (prevents oscillation)
 });
 
 export type TradingConfig = z.infer<typeof TradingConfigSchema>;
@@ -94,6 +95,7 @@ const DEFAULT_TRADING_CONFIG: TradingConfig = {
     reduceOrderTimeoutSeconds: 30,
     positionResumeThresholdPercent: 50,
     pauseAutoResetMinutes: 10,
+    priceRangeResumeBufferPercent: 0.5,
 };
 
 /**

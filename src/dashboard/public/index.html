@@ -40,6 +40,20 @@
                         <span class="stat-value" id="bot-uptime">--</span>
                     </div>
                 </div>
+                <!-- Price Range Info (Micro-Grid) -->
+                <div class="price-range-info" id="price-range-section">
+                    <h3>📍 Price Range</h3>
+                    <div class="price-range-grid">
+                        <div class="range-item">
+                            <span class="range-label">Initial Price</span>
+                            <span class="range-value" id="initial-price">--</span>
+                        </div>
+                        <div class="range-item">
+                            <span class="range-label">Range</span>
+                            <span class="range-value" id="price-range-bounds">--</span>
+                        </div>
+                    </div>
+                </div>
                 <div class="current-trade" id="current-trade">
                     <h3>Current Trade</h3>
                     <div id="trade-details">No active trade</div>
@@ -329,6 +343,12 @@
                             <label>Pause Auto-Reset (min)</label>
                             <input type="number" step="1" min="1" max="60" name="pauseAutoResetMinutes"
                                 id="cfg-pause-reset">
+                        </div>
+                        <div class="config-row">
+                            <label>Resume Buffer %</label>
+                            <input type="number" step="0.1" min="0" max="5" name="priceRangeResumeBufferPercent"
+                                id="cfg-resume-buffer"
+                                title="Price must come back this % inside range before resuming (prevents oscillation)">
                         </div>
                     </div>
 

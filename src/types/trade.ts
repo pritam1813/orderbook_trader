@@ -26,6 +26,11 @@ export interface BotStatus {
     direction: 'LONG' | 'SHORT';
     strategy: string;
     currentTrade: TradeRecord | null;
+    // Micro-grid specific
+    initialPrice?: number;
+    priceRangeLower?: number;
+    priceRangeUpper?: number;
+    priceRangePercent?: number;
 }
 
 /**

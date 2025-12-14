@@ -14,6 +14,10 @@ const elements = {
     botStrategy: document.getElementById('bot-strategy'),
     botUptime: document.getElementById('bot-uptime'),
     currentTrade: document.getElementById('trade-details'),
+    // Price range
+    priceRangeSection: document.getElementById('price-range-section'),
+    initialPrice: document.getElementById('initial-price'),
+    priceRangeBounds: document.getElementById('price-range-bounds'),
     winRate: document.getElementById('win-rate'),
     totalWins: document.getElementById('total-wins'),
     totalLosses: document.getElementById('total-losses'),
@@ -245,7 +249,7 @@ async function saveConfig(e) {
             'maxPositionMultiplier', 'dailyLossLimitPercent', 'makerFeePercent', 'takerFeePercent',
             'minSpreadPercent', 'maxSpreadPercent', 'volatilityLookbackMinutes', 'rollingPriceUpdateTrades',
             'emergencyCloseDeviationPercent', 'stabilizationWaitMinutes', 'reduceOrderTimeoutSeconds',
-            'positionResumeThresholdPercent', 'pauseAutoResetMinutes'].includes(key)) {
+            'positionResumeThresholdPercent', 'pauseAutoResetMinutes', 'priceRangeResumeBufferPercent'].includes(key)) {
             config[key] = parseFloat(value);
         } else {
             config[key] = value;
@@ -431,6 +435,15 @@ function updateStatus(status) {
     } else {
         elements.currentTrade.textContent = 'No active trade';
     }
+
+    // Price range (for micro-grid strategy)
+    if (status.initialPrice && status.initialPrice > 0) {
+        elements.priceRangeSection.style.display = 'block';
+        elements.initialPrice.textContent = '$' + status.initialPrice;
+        elements.priceRangeBounds.textContent = `$${status.priceRangeLower} - $${status.priceRangeUpper}`;
+    } else {
+        elements.priceRangeSection.style.display = 'none';
+    }
 }
 
 function updateUptime() {
@@ -531,6 +544,7 @@ function populateConfig(config) {
     document.getElementById('cfg-reduce-timeout').value = config.reduceOrderTimeoutSeconds || '';
     document.getElementById('cfg-resume-threshold').value = config.positionResumeThresholdPercent || '';
     document.getElementById('cfg-pause-reset').value = config.pauseAutoResetMinutes || '';
+    document.getElementById('cfg-resume-buffer').value = config.priceRangeResumeBufferPercent || '';
 }
 
 function addLog(log) {

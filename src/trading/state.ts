@@ -27,6 +27,10 @@ class BotStateManager extends EventEmitter {
     private _forceClosePnL: number = 0;
     private _takerFees: number = 0;
 
+    // Micro-grid price range tracking
+    private _initialPrice: number = 0;
+    private _priceRangePercent: number = 0;
+
     constructor() {
         super();
         const config = getConfig();
@@ -41,16 +45,37 @@ class BotStateManager extends EventEmitter {
     get consecutiveLosses(): number { return this._consecutiveLosses; }
 
     /**
+     * Set price range for micro-grid strategy (called by strategy)
+     */
+    setPriceRange(initialPrice: number, priceRangePercent: number): void {
+        this._initialPrice = initialPrice;
+        this._priceRangePercent = priceRangePercent;
+        this.emit('statusChange', this.getStatus());
+    }
+
+    /**
      * Get bot status for dashboard
      */
     getStatus(): BotStatus {
         const config = getConfig();
+        const lowerBound = this._initialPrice > 0
+            ? this._initialPrice * (1 - this._priceRangePercent)
+            : 0;
+        const upperBound = this._initialPrice > 0
+            ? this._initialPrice * (1 + this._priceRangePercent)
+            : 0;
+
         return {
             isRunning: this._isRunning,
             startTime: this._startTime,
             direction: this._direction,
             strategy: config.strategy,
             currentTrade: this._currentTrade,
+            // Micro-grid price range
+            initialPrice: this._initialPrice,
+            priceRangeLower: lowerBound,
+            priceRangeUpper: upperBound,
+            priceRangePercent: this._priceRangePercent * 100, // Convert back to percentage
         };
     }
 

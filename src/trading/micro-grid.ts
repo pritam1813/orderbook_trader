@@ -43,6 +43,7 @@ export class MicroGridStrategy {
     private isPaused: boolean = false;
     private pauseStartTime: number = 0;
     private pauseAutoResetMs: number;
+    private resumeBufferPercent: number = 0; // Buffer % to prevent oscillation at range edges
 
     // Stats
     private tradesCompleted: number = 0;
@@ -124,6 +125,7 @@ export class MicroGridStrategy {
 
         // Initialize pause auto-reset config
         this.pauseAutoResetMs = this.config.pauseAutoResetMinutes * 60 * 1000;
+        this.resumeBufferPercent = this.config.priceRangeResumeBufferPercent / 100;
 
         log.info('MicroGridStrategy initialized', {
             symbol: this.symbol,
@@ -235,12 +237,15 @@ export class MicroGridStrategy {
 
     /**
      * Check if current price is within the allowed range from initial price
+     * When paused, uses a stricter buffer zone to prevent oscillation
      */
-    private isPriceInRange(currentPrice: number): boolean {
+    private isPriceInRange(currentPrice: number, useBuffer: boolean = false): boolean {
         if (this.initialPrice === 0) return true; // Not set yet
 
-        const lowerBound = this.initialPrice * (1 - this.priceRangePercent);
-        const upperBound = this.initialPrice * (1 + this.priceRangePercent);
+        // When resuming from pause, require price to be further inside the range
+        const buffer = useBuffer ? this.resumeBufferPercent : 0;
+        const lowerBound = this.initialPrice * (1 - this.priceRangePercent + buffer);
+        const upperBound = this.initialPrice * (1 + this.priceRangePercent - buffer);
 
         return currentPrice >= lowerBound && currentPrice <= upperBound;
     }
@@ -358,11 +363,15 @@ export class MicroGridStrategy {
             this.initialPrice = newInitialPrice;
             this.tradesSinceRangeUpdate = 0;
 
-            log.info('Rolling price range updated', {
-                oldInitialPrice,
-                newInitialPrice,
-                newLowerBound: this.formatPrice(newInitialPrice * (1 - this.priceRangePercent)),
-                newUpperBound: this.formatPrice(newInitialPrice * (1 + this.priceRangePercent)),
+            // Update state manager for dashboard
+            this.state.setPriceRange(this.initialPrice, this.priceRangePercent);
+
+            log.success(`PRICE RANGE UPDATED after ${this.rollingPriceUpdateTrades} trades`);
+            log.info('New price range', {
+                oldInitialPrice: this.formatPrice(oldInitialPrice),
+                newInitialPrice: this.formatPrice(newInitialPrice),
+                lowerBound: this.formatPrice(newInitialPrice * (1 - this.priceRangePercent)),
+                upperBound: this.formatPrice(newInitialPrice * (1 + this.priceRangePercent)),
             });
         }
     }
@@ -1263,7 +1272,9 @@ export class MicroGridStrategy {
 
             // Record initial price for range checking
             this.initialPrice = await this.getCurrentPrice();
-            log.info(`Initial price: ${this.initialPrice}, Range: ${this.formatPrice(this.initialPrice * (1 - this.priceRangePercent))} - ${this.formatPrice(this.initialPrice * (1 + this.priceRangePercent))}`);
+            this.state.setPriceRange(this.initialPrice, this.priceRangePercent);
+            log.success(`INITIAL PRICE SET: ${this.formatPrice(this.initialPrice)}`);
+            log.info(`Price range: ${this.formatPrice(this.initialPrice * (1 - this.priceRangePercent))} - ${this.formatPrice(this.initialPrice * (1 + this.priceRangePercent))}`);
 
             // Place first bracket orders
             await this.placeInitialBracket();
@@ -1304,12 +1315,15 @@ export class MicroGridStrategy {
                             this.isPaused = false;
                             this.pauseStartTime = 0;
 
-                            log.warn('AUTO-RESET: Price range updated after prolonged pause', {
-                                oldInitialPrice,
-                                newInitialPrice: this.initialPrice,
-                                pauseDurationMinutes: Math.round(pauseDuration / 60000),
-                                newLowerBound: this.formatPrice(this.initialPrice * (1 - this.priceRangePercent)),
-                                newUpperBound: this.formatPrice(this.initialPrice * (1 + this.priceRangePercent)),
+                            // Update state manager for dashboard
+                            this.state.setPriceRange(this.initialPrice, this.priceRangePercent);
+
+                            log.success(`PRICE RANGE AUTO-RESET after ${Math.round(pauseDuration / 60000)} min pause`);
+                            log.info('New price range', {
+                                oldInitialPrice: this.formatPrice(oldInitialPrice),
+                                newInitialPrice: this.formatPrice(this.initialPrice),
+                                lowerBound: this.formatPrice(this.initialPrice * (1 - this.priceRangePercent)),
+                                upperBound: this.formatPrice(this.initialPrice * (1 + this.priceRangePercent)),
                             });
 
                             // Resume trading with new price range
@@ -1329,12 +1343,21 @@ export class MicroGridStrategy {
                         continue;
                     }
 
-                    // If we were paused and price is back in range, resume
+                    // If we were paused and price is back in range (with buffer), resume
                     if (this.isPaused) {
-                        log.info('Price back in range, resuming trading...');
-                        this.isPaused = false;
-                        this.pauseStartTime = 0;
-                        await this.placeInitialBracket();
+                        // Use buffer zone to prevent oscillation at range boundary
+                        if (this.isPriceInRange(currentPrice, true)) {
+                            const bufferPct = (this.resumeBufferPercent * 100).toFixed(2);
+                            log.success(`Price back in range (with ${bufferPct}% buffer), resuming trading...`);
+                            log.info(`Current: ${this.formatPrice(currentPrice)}, Effective range: ${this.formatPrice(this.initialPrice * (1 - this.priceRangePercent + this.resumeBufferPercent))} - ${this.formatPrice(this.initialPrice * (1 + this.priceRangePercent - this.resumeBufferPercent))}`);
+                            this.isPaused = false;
+                            this.pauseStartTime = 0;
+                            await this.placeInitialBracket();
+                        } else {
+                            // Still waiting for price to come back inside buffer zone
+                            await this.sleep(5000);
+                            continue;
+                        }
                     }
 
                     // === POSITION REDUCTION & STABILIZATION HANDLING ===
